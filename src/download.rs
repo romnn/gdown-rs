@@ -235,7 +235,7 @@ pub fn build_client(
     if let Some(proxy_url) = proxy {
         let proxy = reqwest::Proxy::all(proxy_url).map_err(Error::Http)?;
         builder = builder.proxy(proxy);
-        eprintln!("Using proxy: {proxy_url}");
+        tracing::info!(proxy_url = %proxy_url, "using proxy");
     }
 
     let client = builder.build()?;
@@ -295,6 +295,25 @@ impl Default for DownloadOptions {
     clippy::too_many_lines,
     reason = "Function is a linear orchestration of the download flow; splitting further would add indirection without improving clarity"
 )]
+#[tracing::instrument(
+    name = "download",
+    level = "info",
+    skip(opts),
+    fields(
+        url = ?opts.url,
+        id = ?opts.id,
+        output = ?opts.output,
+        quiet = opts.quiet,
+        fuzzy = opts.fuzzy,
+        resume = opts.resume,
+        proxy = ?opts.proxy,
+        use_cookies = opts.use_cookies,
+        verify = opts.verify,
+        speed = ?opts.speed,
+        format = ?opts.format,
+        user_agent = ?opts.user_agent
+    )
+)]
 pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
     let has_url = opts.url.is_some();
     let has_id = opts.id.is_some();
@@ -321,6 +340,12 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
 
     let url_origin = url.clone();
     let resource_key = extract_resource_key(&url_origin);
+
+    tracing::debug!(
+        url_origin = %url_origin,
+        resource_key = ?resource_key,
+        "resolved initial url"
+    );
 
     let client = build_client(
         opts.proxy.as_deref(),
@@ -513,14 +538,13 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
         }
 
         if !opts.quiet {
-            eprintln!("Downloading...");
+            tracing::info!("downloading");
             if url_origin == current_url {
-                eprintln!("From: {current_url}");
+                tracing::info!(from = %current_url, "source");
             } else {
-                eprintln!("From (original): {url_origin}");
-                eprintln!("From (redirected): {current_url}");
+                tracing::info!(from_original = %url_origin, from_redirected = %current_url, "source");
             }
-            eprintln!("To: <stdout>");
+            tracing::info!(to = "stdout", "destination");
         }
 
         let total = res
@@ -586,7 +610,7 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
         let output_path = Path::new(&output);
         if resume && output_path.is_file() {
             if !opts.quiet {
-                eprintln!("Skipping already downloaded file {output}");
+                tracing::debug!(output = %output, "skipping already downloaded file");
             }
             return Ok(Some(output));
         }
@@ -620,13 +644,10 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
 
         if resume && !existing_tmp_files.is_empty() {
             if existing_tmp_files.len() != 1 {
-                eprintln!("There are multiple temporary files to resume:");
-                eprintln!();
-                for file in &existing_tmp_files {
-                    eprintln!("\t{}", file.display());
-                }
-                eprintln!();
-                eprintln!("Please remove them except one to resume downloading.");
+                tracing::error!(
+                    tmp_files = ?existing_tmp_files,
+                    "multiple temporary files found for resume; remove all but one"
+                );
                 return Ok(None);
             }
             tmp_file = if let Some(p) = existing_tmp_files.into_iter().next() {
@@ -671,19 +692,18 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
         }
 
         if !opts.quiet {
-            eprintln!("Downloading...");
+            tracing::info!("downloading");
             if resume {
-                eprintln!("Resume: {}", tmp_file.display());
+                tracing::info!(tmp_file = %tmp_file.display(), "resume enabled");
             }
             if url_origin == current_url {
-                eprintln!("From: {current_url}");
+                tracing::info!(from = %current_url, "source");
             } else {
-                eprintln!("From (original): {url_origin}");
-                eprintln!("From (redirected): {current_url}");
+                tracing::info!(from_original = %url_origin, from_redirected = %current_url, "source");
             }
             let abs_output =
                 std::fs::canonicalize(&output).unwrap_or_else(|_| PathBuf::from(&output));
-            eprintln!("To: {}", abs_output.display());
+            tracing::info!(to = %abs_output.display(), "destination");
         }
 
         let total = res

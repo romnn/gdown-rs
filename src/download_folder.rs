@@ -337,7 +337,12 @@ fn process_children(
     for (child_id, child_name, child_type) in id_name_type_iter {
         if child_type != FOLDER_TYPE {
             if !quiet {
-                eprintln!("Processing file {child_id} {child_name}");
+                tracing::debug!(
+                    child_id = %child_id,
+                    child_name = %child_name,
+                    child_type = %child_type,
+                    "processing file"
+                );
             }
             gdrive_file
                 .children
@@ -346,7 +351,7 @@ fn process_children(
         }
 
         if !quiet {
-            eprintln!("Retrieving folder {child_id} {child_name}");
+            tracing::info!(child_id = %child_id, child_name = %child_name, "retrieving folder");
         }
         let mut child_url = format!("https://drive.google.com/drive/folders/{child_id}");
         if let Some(rk) = resource_key {
@@ -472,6 +477,23 @@ pub enum DownloadFolderResult {
     clippy::too_many_lines,
     reason = "Function is a linear orchestration of folder download flow; splitting further would add indirection without improving clarity"
 )]
+#[tracing::instrument(
+    name = "download_folder",
+    level = "info",
+    skip(opts),
+    fields(
+        url = ?opts.url,
+        id = ?opts.id,
+        output = ?opts.output,
+        quiet = opts.quiet,
+        proxy = ?opts.proxy,
+        use_cookies = opts.use_cookies,
+        remaining_ok = opts.remaining_ok,
+        verify = opts.verify,
+        skip_download = opts.skip_download,
+        resume = opts.resume
+    )
+)]
 pub fn download_folder(opts: &DownloadFolderOptions) -> Result<Option<DownloadFolderResult>> {
     let has_url = opts.url.is_some();
     let has_id = opts.id.is_some();
@@ -510,7 +532,7 @@ pub fn download_folder(opts: &DownloadFolderOptions) -> Result<Option<DownloadFo
     )?;
 
     if !opts.quiet {
-        eprintln!("Retrieving folder contents");
+        tracing::info!("retrieving folder contents");
     }
 
     let gdrive_file = download_and_parse_google_drive_link(
@@ -523,19 +545,19 @@ pub fn download_folder(opts: &DownloadFolderOptions) -> Result<Option<DownloadFo
     )?;
 
     let Some(gdrive_file) = gdrive_file else {
-        eprintln!("Failed to retrieve folder contents");
+        tracing::error!("failed to retrieve folder contents");
         return Ok(None);
     };
 
     if !opts.quiet {
-        eprintln!("Retrieving folder contents completed");
-        eprintln!("Building directory structure");
+        tracing::info!("retrieving folder contents completed");
+        tracing::info!("building directory structure");
     }
 
     let directory_structure = get_directory_structure(&gdrive_file, "");
 
     if !opts.quiet {
-        eprintln!("Building directory structure completed");
+        tracing::info!("building directory structure completed");
     }
 
     let output = opts
@@ -586,7 +608,7 @@ pub fn download_folder(opts: &DownloadFolderOptions) -> Result<Option<DownloadFo
 
         if opts.resume && local_path.is_file() {
             if !opts.quiet {
-                eprintln!("Skipping already downloaded file {}", local_path.display());
+                tracing::debug!(path = %local_path.display(), "skipping already downloaded file");
             }
             files.push(local_path.to_string_lossy().to_string());
             continue;
@@ -613,14 +635,18 @@ pub fn download_folder(opts: &DownloadFolderOptions) -> Result<Option<DownloadFo
             files.push(path);
         } else {
             if !opts.quiet {
-                eprintln!("Download ended unsuccessfully");
+                tracing::error!(
+                    file_id = %file_id,
+                    local_path = %local_path.display(),
+                    "download ended unsuccessfully"
+                );
             }
             return Ok(None);
         }
     }
 
     if !opts.quiet {
-        eprintln!("Download completed");
+        tracing::info!(files_downloaded = files.len(), "download completed");
     }
 
     Ok(Some(DownloadFolderResult::Downloaded(files)))

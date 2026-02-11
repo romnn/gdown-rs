@@ -4,6 +4,7 @@ use clap::Parser;
 use gdown::download_folder::DownloadFolderOptions;
 use gdown::error::Error;
 use gdown::{DownloadOptions, download};
+use tracing_subscriber::EnvFilter;
 
 /// Parse a file size string like "10MB" into bytes.
 fn parse_file_size(s: &str) -> Result<f64, String> {
@@ -102,9 +103,25 @@ struct Cli {
     user_agent: Option<String>,
 }
 
-fn main() {
-    let cli = Cli::parse();
-
+#[tracing::instrument(
+    name = "gdown",
+    level = "info",
+    skip(cli),
+    fields(
+        folder = cli.folder,
+        quiet = cli.quiet,
+        fuzzy = cli.fuzzy,
+        resume = cli.resume,
+        output = ?cli.output,
+        proxy = ?cli.proxy,
+        no_cookies = cli.no_cookies,
+        no_check_certificate = cli.no_check_certificate,
+        remaining_ok = cli.remaining_ok,
+        format = ?cli.format,
+        user_agent = ?cli.user_agent
+    )
+)]
+fn run(cli: Cli) -> i32 {
     // Determine if input is URL or ID
     let (url, id) = if cli.url_or_id.starts_with("http://") || cli.url_or_id.starts_with("https://")
     {
@@ -112,6 +129,8 @@ fn main() {
     } else {
         (None, Some(cli.url_or_id.clone()))
     };
+
+    tracing::info!(url = ?url, id = ?id, "starting");
 
     let result = if cli.folder {
         let opts = DownloadFolderOptions {
@@ -150,20 +169,38 @@ fn main() {
     if let Err(e) = result {
         match e {
             Error::FileURLRetrieval(ref msg) => {
-                eprintln!("{msg}");
-                process::exit(1);
+                tracing::error!(message = %msg, "file url retrieval failed");
+                return 1;
             }
             Error::FolderContentsMaximumLimit(ref msg) => {
-                eprintln!(
-                    "Failed to retrieve folder contents:\n\n\t{msg}\n\n\
-                     You can use `--remaining-ok` option to ignore this error."
+                tracing::error!(
+                    message = %msg,
+                    hint = "You can use `--remaining-ok` option to ignore this error.",
+                    "failed to retrieve folder contents"
                 );
-                process::exit(1);
+                return 1;
             }
             _ => {
-                eprintln!("Error:\n\n\t{e}");
-                process::exit(1);
+                tracing::error!(error = %e, "unhandled error");
+                return 1;
             }
         }
     }
+
+    0
+}
+
+fn main() {
+    let cli = Cli::parse();
+
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        if cli.quiet {
+            EnvFilter::new("error")
+        } else {
+            EnvFilter::new("info")
+        }
+    });
+    tracing_subscriber::fmt().with_env_filter(env_filter).init();
+
+    process::exit(run(cli));
 }

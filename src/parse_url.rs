@@ -96,10 +96,10 @@ pub fn parse_url(url_str: &str, warning: bool) -> (Option<String>, bool) {
         && !is_download_link
         && let Some(ref fid) = file_id
     {
-        eprintln!(
-            "Warning: You specified a Google Drive link that is not the correct link \
-                 to download a file. You might want to try `--fuzzy` option \
-                 or the following url: https://drive.google.com/uc?id={fid}"
+        tracing::warn!(
+            file_id = %fid,
+            suggested_url = %format!("https://drive.google.com/uc?id={fid}"),
+            "specified google drive link is not a direct download link; consider using --fuzzy"
         );
     }
 
