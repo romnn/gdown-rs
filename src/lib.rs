@@ -4,10 +4,10 @@ pub mod error;
 pub mod extractall;
 pub mod parse_url;
 
-pub use download::{download, DownloadOptions};
+pub use download::{DownloadOptions, download};
 pub use download_folder::{
-    download_folder, DownloadFolderOptions, DownloadFolderResult, GoogleDriveFileToDownload,
-    MAX_NUMBER_FILES,
+    DownloadFolderOptions, DownloadFolderResult, GoogleDriveFileToDownload, MAX_NUMBER_FILES,
+    download_folder,
 };
 pub use error::{Error, Result};
 pub use extractall::extractall;

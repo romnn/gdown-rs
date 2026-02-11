@@ -7,10 +7,10 @@ fn is_action(action: &str, allowed: &[&str]) -> bool {
 /// Check if a URL is a Google Drive URL.
 #[must_use]
 pub fn is_google_drive_url(url_str: &str) -> bool {
-    if let Ok(parsed) = Url::parse(url_str) {
-        if let Some(host) = parsed.host_str() {
-            return host == "drive.google.com" || host == "docs.google.com";
-        }
+    if let Ok(parsed) = Url::parse(url_str)
+        && let Some(host) = parsed.host_str()
+    {
+        return host == "drive.google.com" || host == "docs.google.com";
     }
     false
 }
@@ -92,14 +92,15 @@ pub fn parse_url(url_str: &str, warning: bool) -> (Option<String>, bool) {
         }
     };
 
-    if warning && !is_download_link {
-        if let Some(ref fid) = file_id {
-            eprintln!(
-                "Warning: You specified a Google Drive link that is not the correct link \
+    if warning
+        && !is_download_link
+        && let Some(ref fid) = file_id
+    {
+        eprintln!(
+            "Warning: You specified a Google Drive link that is not the correct link \
                  to download a file. You might want to try `--fuzzy` option \
                  or the following url: https://drive.google.com/uc?id={fid}"
-            );
-        }
+        );
     }
 
     (file_id, is_download_link)
@@ -128,9 +129,7 @@ mod tests {
                 false,
             ),
             (
-                format!(
-                    "https://drive.google.com/file/d/{file_id}/view?usp=sharing"
-                ),
+                format!("https://drive.google.com/file/d/{file_id}/view?usp=sharing"),
                 Some(file_id.to_string()),
                 false,
                 true,

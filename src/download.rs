@@ -53,12 +53,12 @@ pub fn get_url_from_gdrive_confirmation(contents: &str) -> Result<String> {
     let input_selector = Selector::parse(r#"input[type="hidden"]"#)
         .map_err(|e| Error::ParseError(format!("Failed to parse selector: {e}")))?;
 
-    if let Some(caps) = uc_export_re.captures(contents) {
-        if let Some(m) = caps.get(1) {
-            let url = format!("https://docs.google.com{}", m.as_str());
-            let url = url.replace("&amp;", "&");
-            return Ok(url);
-        }
+    if let Some(caps) = uc_export_re.captures(contents)
+        && let Some(m) = caps.get(1)
+    {
+        let url = format!("https://docs.google.com{}", m.as_str());
+        let url = url.replace("&amp;", "&");
+        return Ok(url);
     }
 
     let document = Html::parse_document(contents);
@@ -101,17 +101,17 @@ pub fn get_url_from_gdrive_confirmation(contents: &str) -> Result<String> {
         return Ok(parsed.to_string());
     }
 
-    if let Some(caps) = download_url_re.captures(contents) {
-        if let Some(m) = caps.get(1) {
-            let url = m.as_str().replace("\\u003d", "=").replace("\\u0026", "&");
-            return Ok(url);
-        }
+    if let Some(caps) = download_url_re.captures(contents)
+        && let Some(m) = caps.get(1)
+    {
+        let url = m.as_str().replace("\\u003d", "=").replace("\\u0026", "&");
+        return Ok(url);
     }
 
-    if let Some(caps) = error_subcaption_re.captures(contents) {
-        if let Some(m) = caps.get(1) {
-            return Err(Error::FileURLRetrieval(m.as_str().to_string()));
-        }
+    if let Some(caps) = error_subcaption_re.captures(contents)
+        && let Some(m) = caps.get(1)
+    {
+        return Err(Error::FileURLRetrieval(m.as_str().to_string()));
     }
 
     Err(Error::FileURLRetrieval(
@@ -138,12 +138,12 @@ pub fn get_filename_from_response(response: &Response) -> Option<String> {
     }
 
     // Try filename="..." format
-    if let Some((_, rest)) = cd_str.split_once("attachment; filename=\"") {
-        if let Some((filename, _)) = rest.split_once('"') {
-            let filename = sanitize_path_component(filename);
-            if !filename.is_empty() {
-                return Some(filename);
-            }
+    if let Some((_, rest)) = cd_str.split_once("attachment; filename=\"")
+        && let Some((filename, _)) = rest.split_once('"')
+    {
+        let filename = sanitize_path_component(filename);
+        if !filename.is_empty() {
+            return Some(filename);
         }
     }
 
@@ -164,12 +164,12 @@ fn get_confirm_token_from_headers(headers: &HeaderMap) -> Option<String> {
             continue;
         };
 
-        if let Some((name, rest)) = cookie.split_once('=') {
-            if name.starts_with("download_warning") {
-                let token = rest.split(';').next().unwrap_or("").trim();
-                if !token.is_empty() {
-                    return Some(token.to_string());
-                }
+        if let Some((name, rest)) = cookie.split_once('=')
+            && name.starts_with("download_warning")
+        {
+            let token = rest.split(';').next().unwrap_or("").trim();
+            if !token.is_empty() {
+                return Some(token.to_string());
             }
         }
     }
@@ -310,7 +310,7 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
         _ => {
             return Err(Error::InvalidInput(
                 "Either url or id has to be specified".to_string(),
-            ))
+            ));
         }
     };
 
@@ -331,12 +331,12 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
 
     let (gdrive_file_id, is_gdrive_download_link) = parse_url(&url, !opts.fuzzy);
 
-    if opts.fuzzy {
-        if let Some(ref fid) = gdrive_file_id {
-            url = format!("https://drive.google.com/uc?id={fid}");
-            if let Some(ref rk) = resource_key {
-                url = format!("{url}&resourcekey={rk}");
-            }
+    if opts.fuzzy
+        && let Some(ref fid) = gdrive_file_id
+    {
+        url = format!("https://drive.google.com/uc?id={fid}");
+        if let Some(ref rk) = resource_key {
+            url = format!("{url}&resourcekey={rk}");
         }
     }
 
@@ -362,14 +362,15 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
             break;
         }
 
-        if current_url == url_after_fuzzy && res.status().as_u16() == 500 {
-            if let Some(ref fid) = gdrive_file_id {
-                current_url = format!("https://drive.google.com/open?id={fid}");
-                if let Some(ref rk) = resource_key {
-                    current_url = format!("{current_url}&resourcekey={rk}");
-                }
-                continue;
+        if current_url == url_after_fuzzy
+            && res.status().as_u16() == 500
+            && let Some(ref fid) = gdrive_file_id
+        {
+            current_url = format!("https://drive.google.com/open?id={fid}");
+            if let Some(ref rk) = resource_key {
+                current_url = format!("{current_url}&resourcekey={rk}");
             }
+            continue;
         }
 
         let content_type = res
@@ -411,13 +412,13 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
             match get_url_from_gdrive_confirmation(&text) {
                 Ok(new_url) => {
                     let mut new_url = new_url;
-                    if let Some(ref rk) = resource_key {
-                        if !new_url.contains("resourcekey=") {
-                            if new_url.contains('?') {
-                                new_url = format!("{new_url}&resourcekey={rk}");
-                            } else {
-                                new_url = format!("{new_url}?resourcekey={rk}");
-                            }
+                    if let Some(ref rk) = resource_key
+                        && !new_url.contains("resourcekey=")
+                    {
+                        if new_url.contains('?') {
+                            new_url = format!("{new_url}&resourcekey={rk}");
+                        } else {
+                            new_url = format!("{new_url}?resourcekey={rk}");
                         }
                     }
                     current_url = new_url;
@@ -428,8 +429,9 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
                         let token = get_confirm_token_from_headers(&headers)
                             .or_else(|| get_confirm_token_from_html(&text));
                         if let Some(token) = token {
-                            let mut new_url =
-                                format!("https://drive.google.com/uc?export=download&id={fid}&confirm={token}");
+                            let mut new_url = format!(
+                                "https://drive.google.com/uc?export=download&id={fid}&confirm={token}"
+                            );
                             if let Some(ref rk) = resource_key {
                                 new_url = format!("{new_url}&resourcekey={rk}");
                             }
@@ -448,21 +450,16 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
             }
         }
         // Check Content-Disposition for pptx redirect
-        if let Some(cd) = res.headers().get("Content-Disposition") {
-            if let Ok(cd_str) = cd.to_str() {
-                if cd_str.ends_with("pptx") {
-                    if let Some(ref fmt) = opts.format {
-                        if fmt != "pptx" {
-                            if let Some(ref fid) = gdrive_file_id {
-                                current_url = format!(
-                                    "https://docs.google.com/presentation/d/{fid}/export?format={fmt}"
-                                );
-                                continue;
-                            }
-                        }
-                    }
-                }
-            }
+        if let Some(cd) = res.headers().get("Content-Disposition")
+            && let Ok(cd_str) = cd.to_str()
+            && cd_str.ends_with("pptx")
+            && let Some(ref fmt) = opts.format
+            && fmt != "pptx"
+            && let Some(ref fid) = gdrive_file_id
+        {
+            current_url =
+                format!("https://docs.google.com/presentation/d/{fid}/export?format={fmt}");
+            continue;
         }
 
         // For non-html, non-gdrive content, just break
@@ -604,17 +601,17 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
             .unwrap_or_default();
 
         let mut existing_tmp_files: Vec<PathBuf> = Vec::new();
-        if dir.is_dir() {
-            if let Ok(entries) = fs::read_dir(&dir) {
-                for entry in entries.flatten() {
-                    let fname = entry.file_name().to_string_lossy().to_string();
-                    if fname.starts_with(&basename)
-                        && Path::new(&fname)
-                            .extension()
-                            .is_some_and(|ext| ext.eq_ignore_ascii_case("part"))
-                    {
-                        existing_tmp_files.push(entry.path());
-                    }
+        if dir.is_dir()
+            && let Ok(entries) = fs::read_dir(&dir)
+        {
+            for entry in entries.flatten() {
+                let fname = entry.file_name().to_string_lossy().to_string();
+                if fname.starts_with(&basename)
+                    && Path::new(&fname)
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("part"))
+                {
+                    existing_tmp_files.push(entry.path());
                 }
             }
         }

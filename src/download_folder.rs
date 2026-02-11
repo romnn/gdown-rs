@@ -5,7 +5,7 @@ use regex::Regex;
 use scraper::{Html, Selector};
 use url::Url;
 
-use crate::download::{build_client, download, DownloadOptions, DEFAULT_FOLDER_USER_AGENT};
+use crate::download::{DEFAULT_FOLDER_USER_AGENT, DownloadOptions, build_client, download};
 use crate::error::{Error, Result};
 use crate::parse_url::is_google_drive_url;
 
@@ -143,7 +143,7 @@ pub fn parse_google_drive_file(url: &str, content: &str) -> Result<ParsedGoogleD
         .unwrap_or_default();
 
     let sep = "\u{00a0}-\u{00a0}"; // unicode non-breaking space dash
-                                   // Also try regular " - "
+    // Also try regular " - "
     let name = if let Some(pos) = title_text.rfind(sep) {
         title_text[..pos].to_string()
     } else if let Some(pos) = title_text.rfind(" - ") {
@@ -487,7 +487,7 @@ pub fn download_folder(opts: &DownloadFolderOptions) -> Result<Option<DownloadFo
         _ => {
             return Err(Error::InvalidInput(
                 "Either url or id has to be specified".to_string(),
-            ))
+            ));
         }
     };
 

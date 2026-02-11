@@ -2,12 +2,12 @@ use std::fs;
 
 use gdown::download::get_url_from_gdrive_confirmation;
 use gdown::download_folder::{
-    get_directory_structure, parse_google_drive_file, DownloadFolderOptions, GoogleDriveFile,
-    GoogleDriveFileToDownload, MAX_NUMBER_FILES,
+    DownloadFolderOptions, GoogleDriveFile, GoogleDriveFileToDownload, MAX_NUMBER_FILES,
+    get_directory_structure, parse_google_drive_file,
 };
 use gdown::error::Error;
 use gdown::parse_url::{is_google_drive_url, parse_url};
-use gdown::{download, DownloadOptions};
+use gdown::{DownloadOptions, download};
 
 // ---------------------------------------------------------------------------
 // test_parse_url (ports vendor/gdown/tests/test_parse_url.py)

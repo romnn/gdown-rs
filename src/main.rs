@@ -3,7 +3,7 @@ use std::process;
 use clap::Parser;
 use gdown::download_folder::DownloadFolderOptions;
 use gdown::error::Error;
-use gdown::{download, DownloadOptions};
+use gdown::{DownloadOptions, download};
 
 /// Parse a file size string like "10MB" into bytes.
 fn parse_file_size(s: &str) -> Result<f64, String> {
