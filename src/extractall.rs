@@ -8,6 +8,11 @@ use crate::error::{Error, Result};
 /// Supported formats: `.zip`, `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz`.
 ///
 /// Returns the list of extracted file paths.
+///
+/// # Errors
+///
+/// Returns an error if the archive format is unsupported, the input file cannot be read,
+/// extraction fails, or the destination directory cannot be created/written.
 pub fn extractall(path: &str, to: Option<&str>) -> Result<Vec<String>> {
     let archive_path = Path::new(path);
     let dest = match to {
@@ -22,38 +27,55 @@ pub fn extractall(path: &str, to: Option<&str>) -> Result<Vec<String>> {
         fs::create_dir_all(&dest)?;
     }
 
-    if path.ends_with(".zip") {
+    if has_extension(archive_path, "zip") {
         extract_zip(archive_path, &dest)
-    } else if path.ends_with(".tar") {
+    } else if has_extension(archive_path, "tar") {
         extract_tar(archive_path, &dest, Compression::None)
-    } else if path.ends_with(".tar.gz") || path.ends_with(".tgz") {
+    } else if has_extension(archive_path, "tgz") || has_double_extension(archive_path, "tar", "gz")
+    {
         extract_tar(archive_path, &dest, Compression::Gzip)
-    } else if path.ends_with(".tar.bz2") || path.ends_with(".tbz") {
+    } else if has_extension(archive_path, "tbz") || has_double_extension(archive_path, "tar", "bz2")
+    {
         extract_tar(archive_path, &dest, Compression::Bzip2)
     } else {
         Err(Error::ExtractError(format!(
-            "Could not extract '{}' as no appropriate extractor is found",
-            path
+            "Could not extract '{path}' as no appropriate extractor is found"
         )))
     }
 }
 
+#[derive(Copy, Clone)]
 enum Compression {
     None,
     Gzip,
     Bzip2,
 }
 
+fn has_extension(path: &Path, ext: &str) -> bool {
+    path.extension()
+        .is_some_and(|actual| actual.eq_ignore_ascii_case(ext))
+}
+
+fn has_double_extension(path: &Path, first: &str, second: &str) -> bool {
+    if !has_extension(path, second) {
+        return false;
+    }
+
+    path.file_stem()
+        .and_then(|stem| Path::new(stem).extension())
+        .is_some_and(|actual| actual.eq_ignore_ascii_case(first))
+}
+
 fn extract_zip(path: &Path, dest: &Path) -> Result<Vec<String>> {
     let file = fs::File::open(path)?;
     let mut archive = zip::ZipArchive::new(file)
-        .map_err(|e| Error::ExtractError(format!("Failed to open zip: {}", e)))?;
+        .map_err(|e| Error::ExtractError(format!("Failed to open zip: {e}")))?;
 
     let mut files = Vec::new();
     for i in 0..archive.len() {
         let mut entry = archive
             .by_index(i)
-            .map_err(|e| Error::ExtractError(format!("Failed to read zip entry: {}", e)))?;
+            .map_err(|e| Error::ExtractError(format!("Failed to read zip entry: {e}")))?;
         let outpath = dest.join(entry.mangled_name());
 
         if entry.is_dir() {
@@ -119,14 +141,12 @@ mod tests {
     type TestResult = std::result::Result<(), Box<dyn std::error::Error>>;
 
     #[test]
-    fn test_extractall_unsupported_format() -> TestResult {
+    fn test_extractall_unsupported_format() {
         let result = extractall("file.rar", None);
         assert!(result.is_err());
         if let Err(Error::ExtractError(msg)) = result {
             assert!(msg.contains("no appropriate extractor"));
         }
-
-        Ok(())
     }
 
     #[test]

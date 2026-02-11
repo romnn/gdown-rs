@@ -2,8 +2,8 @@ use std::fs;
 
 use gdown::download::get_url_from_gdrive_confirmation;
 use gdown::download_folder::{
-    get_directory_structure, parse_google_drive_file, DownloadFolderOptions,
-    GoogleDriveFile, GoogleDriveFileToDownload, MAX_NUMBER_FILES,
+    get_directory_structure, parse_google_drive_file, DownloadFolderOptions, GoogleDriveFile,
+    GoogleDriveFileToDownload, MAX_NUMBER_FILES,
 };
 use gdown::error::Error;
 use gdown::parse_url::{is_google_drive_url, parse_url};
@@ -16,7 +16,7 @@ use gdown::{download, DownloadOptions};
 #[test]
 fn test_parse_url_open_link() {
     let file_id = "0B_NiLAzvehC9R2stRmQyM3ZiVjQ";
-    let url = format!("https://drive.google.com/open?id={}", file_id);
+    let url = format!("https://drive.google.com/open?id={file_id}");
     let (id, is_dl) = parse_url(&url, false);
     assert_eq!(id.as_deref(), Some(file_id));
     assert!(!is_dl);
@@ -25,7 +25,7 @@ fn test_parse_url_open_link() {
 #[test]
 fn test_parse_url_uc_link() {
     let file_id = "0B_NiLAzvehC9R2stRmQyM3ZiVjQ";
-    let url = format!("https://drive.google.com/uc?id={}", file_id);
+    let url = format!("https://drive.google.com/uc?id={file_id}");
     let (id, is_dl) = parse_url(&url, false);
     assert_eq!(id.as_deref(), Some(file_id));
     assert!(is_dl);
@@ -34,10 +34,7 @@ fn test_parse_url_uc_link() {
 #[test]
 fn test_parse_url_file_view_link() {
     let file_id = "0B_NiLAzvehC9R2stRmQyM3ZiVjQ";
-    let url = format!(
-        "https://drive.google.com/file/d/{}/view?usp=sharing",
-        file_id
-    );
+    let url = format!("https://drive.google.com/file/d/{file_id}/view?usp=sharing");
     let (id, is_dl) = parse_url(&url, false);
     assert_eq!(id.as_deref(), Some(file_id));
     assert!(!is_dl);
@@ -47,8 +44,7 @@ fn test_parse_url_file_view_link() {
 fn test_parse_url_subdomain_uc_link() {
     let file_id = "0B_NiLAzvehC9R2stRmQyM3ZiVjQ";
     let url = format!(
-        "https://drive.google.com/a/jsk.imi.i.u-tokyo.ac.jp/uc?id={}&export=download",
-        file_id
+        "https://drive.google.com/a/jsk.imi.i.u-tokyo.ac.jp/uc?id={file_id}&export=download"
     );
     let (id, is_dl) = parse_url(&url, false);
     assert_eq!(id.as_deref(), Some(file_id));
@@ -66,7 +62,7 @@ fn test_parse_url_non_gdrive() {
 #[test]
 fn test_parse_url_document_edit() {
     let file_id = "abcdef123456";
-    let url = format!("https://docs.google.com/document/d/{}/edit", file_id);
+    let url = format!("https://docs.google.com/document/d/{file_id}/edit");
     let (id, is_dl) = parse_url(&url, false);
     assert_eq!(id.as_deref(), Some(file_id));
     assert!(!is_dl);
@@ -75,10 +71,7 @@ fn test_parse_url_document_edit() {
 #[test]
 fn test_parse_url_spreadsheets_view() {
     let file_id = "spreadsheet_id_xyz";
-    let url = format!(
-        "https://docs.google.com/spreadsheets/d/{}/view",
-        file_id
-    );
+    let url = format!("https://docs.google.com/spreadsheets/d/{file_id}/view");
     let (id, is_dl) = parse_url(&url, false);
     assert_eq!(id.as_deref(), Some(file_id));
     assert!(!is_dl);
@@ -87,10 +80,7 @@ fn test_parse_url_spreadsheets_view() {
 #[test]
 fn test_parse_url_presentation_view() {
     let file_id = "slides_id_abc";
-    let url = format!(
-        "https://docs.google.com/presentation/d/{}/view",
-        file_id
-    );
+    let url = format!("https://docs.google.com/presentation/d/{file_id}/view");
     let (id, is_dl) = parse_url(&url, false);
     assert_eq!(id.as_deref(), Some(file_id));
     assert!(!is_dl);
@@ -99,10 +89,7 @@ fn test_parse_url_presentation_view() {
 #[test]
 fn test_parse_url_file_with_user_number() {
     let file_id = "abcdef";
-    let url = format!(
-        "https://drive.google.com/file/u/0/d/{}/view",
-        file_id
-    );
+    let url = format!("https://drive.google.com/file/u/0/d/{file_id}/view");
     let (id, is_dl) = parse_url(&url, false);
     assert_eq!(id.as_deref(), Some(file_id));
     assert!(!is_dl);
@@ -135,9 +122,8 @@ fn test_download_either_url_or_id_required() -> TestResult {
         id: None,
         ..DownloadOptions::default()
     };
-    let err = match download(&opts) {
-        Ok(_) => return Err("expected error".into()),
-        Err(e) => e,
+    let Err(err) = download(&opts) else {
+        return Err("expected error".into());
     };
     match err {
         Error::InvalidInput(msg) => {
@@ -152,7 +138,7 @@ fn test_download_either_url_or_id_required() -> TestResult {
 }
 
 #[test]
-fn test_download_both_url_and_id_is_error() -> TestResult {
+fn test_download_both_url_and_id_is_error() {
     let opts = DownloadOptions {
         url: Some("https://example.com".to_string()),
         id: Some("abc".to_string()),
@@ -160,8 +146,6 @@ fn test_download_both_url_and_id_is_error() -> TestResult {
     };
     let result = download(&opts);
     assert!(result.is_err());
-
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -183,7 +167,8 @@ fn test_gdrive_confirmation_uc_export_link() -> TestResult {
 
 #[test]
 fn test_gdrive_confirmation_download_url_json() -> TestResult {
-    let html = "something \"downloadUrl\":\"https://example.com/download\\u003did\\u0026token\" else";
+    let html =
+        "something \"downloadUrl\":\"https://example.com/download\\u003did\\u0026token\" else";
     let url = get_url_from_gdrive_confirmation(html)?;
     assert_eq!(url, "https://example.com/download=id&token");
 
@@ -195,9 +180,8 @@ fn test_gdrive_confirmation_error_subcaption() -> TestResult {
     let html = r#"<p class="uc-error-subcaption">Sorry, quota exceeded</p>"#;
     let result = get_url_from_gdrive_confirmation(html);
     assert!(result.is_err());
-    let err = match result {
-        Ok(_) => return Err("expected error".into()),
-        Err(e) => e,
+    let Err(err) = result else {
+        return Err("expected error".into());
     };
     match err {
         Error::FileURLRetrieval(msg) => {
@@ -216,9 +200,8 @@ fn test_gdrive_confirmation_empty_page() -> TestResult {
     let html = "<html><body>Nothing useful here</body></html>";
     let result = get_url_from_gdrive_confirmation(html);
     assert!(result.is_err());
-    let err = match result {
-        Ok(_) => return Err("expected error".into()),
-        Err(e) => e,
+    let Err(err) = result else {
+        return Err("expected error".into());
     };
     match err {
         Error::FileURLRetrieval(msg) => {
@@ -259,8 +242,7 @@ fn test_valid_page_parse() -> TestResult {
         "/tests/data/folder-page-sample.html"
     );
     let content = fs::read_to_string(html_path)?;
-    let folder_url =
-        "https://drive.google.com/drive/folders/1KpLl_1tcK0eeehzN980zbG-3M2nhbVks";
+    let folder_url = "https://drive.google.com/drive/folders/1KpLl_1tcK0eeehzN980zbG-3M2nhbVks";
 
     let (gdrive_file, id_name_type_iter) = parse_google_drive_file(folder_url, &content)?;
 
@@ -292,7 +274,10 @@ fn test_valid_page_parse() -> TestResult {
         "image/jpeg",
     ];
 
-    let actual_ids: Vec<&str> = id_name_type_iter.iter().map(|(id, _, _)| id.as_str()).collect();
+    let actual_ids: Vec<&str> = id_name_type_iter
+        .iter()
+        .map(|(id, _, _)| id.as_str())
+        .collect();
     let actual_names: Vec<&str> = id_name_type_iter
         .iter()
         .map(|(_, n, _)| n.as_str())

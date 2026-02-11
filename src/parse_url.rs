@@ -1,6 +1,11 @@
 use url::Url;
 
+fn is_action(action: &str, allowed: &[&str]) -> bool {
+    allowed.contains(&action)
+}
+
 /// Check if a URL is a Google Drive URL.
+#[must_use]
 pub fn is_google_drive_url(url_str: &str) -> bool {
     if let Ok(parsed) = Url::parse(url_str) {
         if let Some(host) = parsed.host_str() {
@@ -15,10 +20,10 @@ pub fn is_google_drive_url(url_str: &str) -> bool {
 /// Returns `(file_id, is_download_link)` where:
 /// - `file_id`: ID of file on Google Drive (None if not a Google Drive URL or ID not found).
 /// - `is_download_link`: Flag if it is a download link of Google Drive.
+#[must_use]
 pub fn parse_url(url_str: &str, warning: bool) -> (Option<String>, bool) {
-    let parsed = match Url::parse(url_str) {
-        Ok(u) => u,
-        Err(_) => return (None, false),
+    let Ok(parsed) = Url::parse(url_str) else {
+        return (None, false);
     };
 
     let is_gdrive = is_google_drive_url(url_str);
@@ -46,17 +51,11 @@ pub fn parse_url(url_str: &str, warning: bool) -> (Option<String>, bool) {
             None => Vec::new(),
         };
 
-        fn is_action(action: &str, allowed: &[&str]) -> bool {
-            allowed.contains(&action)
-        }
-
         match segments.as_slice() {
             ["file", "d", fid, action, ..] if is_action(action, &["edit", "view"]) => {
                 Some((*fid).to_string())
             }
-            ["file", "u", _user, "d", fid, action, ..]
-                if is_action(action, &["edit", "view"]) =>
-            {
+            ["file", "u", _user, "d", fid, action, ..] if is_action(action, &["edit", "view"]) => {
                 Some((*fid).to_string())
             }
             ["document", "d", fid, action, ..]
@@ -98,8 +97,7 @@ pub fn parse_url(url_str: &str, warning: bool) -> (Option<String>, bool) {
             eprintln!(
                 "Warning: You specified a Google Drive link that is not the correct link \
                  to download a file. You might want to try `--fuzzy` option \
-                 or the following url: https://drive.google.com/uc?id={}",
-                fid
+                 or the following url: https://drive.google.com/uc?id={fid}"
             );
         }
     }
@@ -118,21 +116,20 @@ mod tests {
         // (url, expected_file_id, expected_is_download_link, should_warn)
         let urls = vec![
             (
-                format!("https://drive.google.com/open?id={}", file_id),
+                format!("https://drive.google.com/open?id={file_id}"),
                 Some(file_id.to_string()),
                 false,
                 true,
             ),
             (
-                format!("https://drive.google.com/uc?id={}", file_id),
+                format!("https://drive.google.com/uc?id={file_id}"),
                 Some(file_id.to_string()),
                 true,
                 false,
             ),
             (
                 format!(
-                    "https://drive.google.com/file/d/{}/view?usp=sharing",
-                    file_id
+                    "https://drive.google.com/file/d/{file_id}/view?usp=sharing"
                 ),
                 Some(file_id.to_string()),
                 false,
@@ -140,8 +137,7 @@ mod tests {
             ),
             (
                 format!(
-                    "https://drive.google.com/a/jsk.imi.i.u-tokyo.ac.jp/uc?id={}&export=download",
-                    file_id
+                    "https://drive.google.com/a/jsk.imi.i.u-tokyo.ac.jp/uc?id={file_id}&export=download"
                 ),
                 Some(file_id.to_string()),
                 true,
@@ -152,15 +148,10 @@ mod tests {
         for (url, expected_id, expected_is_download, _should_warn) in urls {
             // We pass warning=false to avoid printing warnings in tests
             let (actual_id, actual_is_download) = parse_url(&url, false);
-            assert_eq!(
-                actual_id, expected_id,
-                "file_id mismatch for url: {}",
-                url
-            );
+            assert_eq!(actual_id, expected_id, "file_id mismatch for url: {url}");
             assert_eq!(
                 actual_is_download, expected_is_download,
-                "is_download_link mismatch for url: {}",
-                url
+                "is_download_link mismatch for url: {url}"
             );
         }
     }
@@ -168,7 +159,9 @@ mod tests {
     #[test]
     fn test_is_google_drive_url() {
         assert!(is_google_drive_url("https://drive.google.com/uc?id=abc"));
-        assert!(is_google_drive_url("https://docs.google.com/document/d/abc/view"));
+        assert!(is_google_drive_url(
+            "https://docs.google.com/document/d/abc/view"
+        ));
         assert!(!is_google_drive_url("https://example.com/file"));
     }
 }

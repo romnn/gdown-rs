@@ -36,17 +36,22 @@ fn sanitize_path_component(name: &str) -> String {
 }
 
 /// Extract the download URL from a Google Drive confirmation page.
+///
+/// # Errors
+///
+/// Returns an error if the confirmation page indicates the file is not accessible,
+/// or if the download URL cannot be extracted.
 pub fn get_url_from_gdrive_confirmation(contents: &str) -> Result<String> {
-    let uc_export_re = Regex::new(r#"href="(/uc\?export=download[^"]+)"#)
-        .map_err(|e| Error::ParseError(format!("Failed to compile regex: {}", e)))?;
+    let uc_export_re = Regex::new(r#"href="(/uc\?export=download[^"]+)""#)
+        .map_err(|e| Error::ParseError(format!("Failed to compile regex: {e}")))?;
     let download_url_re = Regex::new(r#"\"downloadUrl\":\"([^"]+)\""#)
-        .map_err(|e| Error::ParseError(format!("Failed to compile regex: {}", e)))?;
+        .map_err(|e| Error::ParseError(format!("Failed to compile regex: {e}")))?;
     let error_subcaption_re = Regex::new(r#"<p class=\"uc-error-subcaption\">(.*)</p>"#)
-        .map_err(|e| Error::ParseError(format!("Failed to compile regex: {}", e)))?;
+        .map_err(|e| Error::ParseError(format!("Failed to compile regex: {e}")))?;
     let form_selector = Selector::parse("#download-form")
-        .map_err(|e| Error::ParseError(format!("Failed to parse selector: {}", e)))?;
+        .map_err(|e| Error::ParseError(format!("Failed to parse selector: {e}")))?;
     let input_selector = Selector::parse(r#"input[type="hidden"]"#)
-        .map_err(|e| Error::ParseError(format!("Failed to parse selector: {}", e)))?;
+        .map_err(|e| Error::ParseError(format!("Failed to parse selector: {e}")))?;
 
     if let Some(caps) = uc_export_re.captures(contents) {
         if let Some(m) = caps.get(1) {
@@ -66,14 +71,14 @@ pub fn get_url_from_gdrive_confirmation(contents: &str) -> Result<String> {
 
         let parsed_result = Url::parse(&action).or_else(|_| {
             if action.starts_with('/') {
-                Url::parse(&format!("https://docs.google.com{}", action))
+                Url::parse(&format!("https://docs.google.com{action}"))
             } else {
-                Url::parse(&format!("https://docs.google.com/{}", action))
+                Url::parse(&format!("https://docs.google.com/{action}"))
             }
         });
 
         let mut parsed = parsed_result.map_err(|e| {
-            Error::FileURLRetrieval(format!("Failed to parse form action URL: {}", e))
+            Error::FileURLRetrieval(format!("Failed to parse form action URL: {e}"))
         })?;
 
         // Collect hidden input fields
@@ -98,10 +103,7 @@ pub fn get_url_from_gdrive_confirmation(contents: &str) -> Result<String> {
 
     if let Some(caps) = download_url_re.captures(contents) {
         if let Some(m) = caps.get(1) {
-            let url = m
-                .as_str()
-                .replace("\\u003d", "=")
-                .replace("\\u0026", "&");
+            let url = m.as_str().replace("\\u003d", "=").replace("\\u0026", "&");
             return Ok(url);
         }
     }
@@ -122,6 +124,7 @@ pub fn get_url_from_gdrive_confirmation(contents: &str) -> Result<String> {
 }
 
 /// Extract filename from Content-Disposition header.
+#[must_use]
 pub fn get_filename_from_response(response: &Response) -> Option<String> {
     let content_disposition = response.headers().get("Content-Disposition")?;
     let cd_str = urlencoding::decode(content_disposition.to_str().ok()?).ok()?;
@@ -156,7 +159,7 @@ fn extract_resource_key(url: &str) -> Option<String> {
 }
 
 fn get_confirm_token_from_headers(headers: &HeaderMap) -> Option<String> {
-    for value in headers.get_all(SET_COOKIE).iter() {
+    for value in &headers.get_all(SET_COOKIE) {
         let Ok(cookie) = value.to_str() else {
             continue;
         };
@@ -180,14 +183,12 @@ fn get_confirm_token_from_html(html: &str) -> Option<String> {
 
     let mut tokens: Vec<String> = Vec::new();
     let mut search_start = 0usize;
-    while let Some(relative_pos) = html
-        .get(search_start..)
-        .and_then(|s| s.find(needle))
-    {
-        let start = search_start.saturating_add(relative_pos).saturating_add(needle.len());
-        let rest = match html.get(start..) {
-            Some(r) => r,
-            None => break,
+    while let Some(relative_pos) = html.get(search_start..).and_then(|s| s.find(needle)) {
+        let start = search_start
+            .saturating_add(relative_pos)
+            .saturating_add(needle.len());
+        let Some(rest) = html.get(start..) else {
+            break;
         };
         let end = rest
             .find(|c: char| c == '&' || c == '"' || c == '\'' || c.is_whitespace())
@@ -205,7 +206,7 @@ fn get_confirm_token_from_html(html: &str) -> Option<String> {
     }
 
     tokens.retain(|t| t != "t");
-    tokens.sort_by_key(|t| t.len());
+    tokens.sort_by_key(std::string::String::len);
     tokens.pop()
 }
 
@@ -216,6 +217,10 @@ fn read_response_text_limited(res: Response) -> Result<String> {
 }
 
 /// Build an HTTP client (session equivalent).
+///
+/// # Errors
+///
+/// Returns an error if proxy configuration is invalid or the HTTP client cannot be built.
 pub fn build_client(
     proxy: Option<&str>,
     use_cookies: bool,
@@ -228,10 +233,9 @@ pub fn build_client(
         .cookie_store(use_cookies);
 
     if let Some(proxy_url) = proxy {
-        let proxy = reqwest::Proxy::all(proxy_url)
-            .map_err(Error::Http)?;
+        let proxy = reqwest::Proxy::all(proxy_url).map_err(Error::Http)?;
         builder = builder.proxy(proxy);
-        eprintln!("Using proxy: {}", proxy_url);
+        eprintln!("Using proxy: {proxy_url}");
     }
 
     let client = builder.build()?;
@@ -240,6 +244,10 @@ pub fn build_client(
 
 /// Options for downloading a file.
 #[derive(Debug, Clone)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "Mirrors upstream gdown CLI flags; refactoring into enums/state machines would be a breaking API change"
+)]
 pub struct DownloadOptions {
     pub url: Option<String>,
     pub output: Option<String>,
@@ -278,6 +286,15 @@ impl Default for DownloadOptions {
 ///
 /// Google Drive URL is also supported.
 /// Returns the output filename on success.
+///
+/// # Errors
+///
+/// Returns an error if input options are invalid, network/HTTP requests fail,
+/// Google Drive confirmation pages cannot be parsed, or local filesystem operations fail.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Function is a linear orchestration of the download flow; splitting further would add indirection without improving clarity"
+)]
 pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
     let has_url = opts.url.is_some();
     let has_id = opts.id.is_some();
@@ -288,7 +305,7 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
     }
 
     let mut url = match (&opts.id, &opts.url) {
-        (Some(id), None) => format!("https://drive.google.com/uc?id={}", id),
+        (Some(id), None) => format!("https://drive.google.com/uc?id={id}"),
         (None, Some(u)) => u.clone(),
         _ => {
             return Err(Error::InvalidInput(
@@ -316,9 +333,9 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
 
     if opts.fuzzy {
         if let Some(ref fid) = gdrive_file_id {
-            url = format!("https://drive.google.com/uc?id={}", fid);
+            url = format!("https://drive.google.com/uc?id={fid}");
             if let Some(ref rk) = resource_key {
-                url = format!("{}&resourcekey={}", url, rk);
+                url = format!("{url}&resourcekey={rk}");
             }
         }
     }
@@ -332,7 +349,7 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
     let url_after_fuzzy = url.clone();
 
     let title_re = Regex::new(r"<title>(.+)</title>")
-        .map_err(|e| Error::ParseError(format!("Failed to compile regex: {}", e)))?;
+        .map_err(|e| Error::ParseError(format!("Failed to compile regex: {e}")))?;
 
     // Re-assign for the loop
     let mut current_url = url;
@@ -347,9 +364,9 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
 
         if current_url == url_after_fuzzy && res.status().as_u16() == 500 {
             if let Some(ref fid) = gdrive_file_id {
-                current_url = format!("https://drive.google.com/open?id={}", fid);
+                current_url = format!("https://drive.google.com/open?id={fid}");
                 if let Some(ref rk) = resource_key {
-                    current_url = format!("{}&resourcekey={}", current_url, rk);
+                    current_url = format!("{current_url}&resourcekey={rk}");
                 }
                 continue;
             }
@@ -366,27 +383,23 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
             let headers = res.headers().clone();
             let text = read_response_text_limited(res)?;
             if let Some(caps) = title_re.captures(&text) {
-                let title = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                let title = caps.get(1).map_or("", |m| m.as_str());
                 if let Some(ref fid) = gdrive_file_id {
                     if title.ends_with(" - Google Docs") {
                         let fmt = opts.format.as_deref().unwrap_or("docx");
-                        current_url = format!(
-                            "https://docs.google.com/document/d/{}/export?format={}",
-                            fid, fmt
-                        );
+                        current_url =
+                            format!("https://docs.google.com/document/d/{fid}/export?format={fmt}");
                         continue;
                     } else if title.ends_with(" - Google Sheets") {
                         let fmt = opts.format.as_deref().unwrap_or("xlsx");
                         current_url = format!(
-                            "https://docs.google.com/spreadsheets/d/{}/export?format={}",
-                            fid, fmt
+                            "https://docs.google.com/spreadsheets/d/{fid}/export?format={fmt}"
                         );
                         continue;
                     } else if title.ends_with(" - Google Slides") {
                         let fmt = opts.format.as_deref().unwrap_or("pptx");
                         current_url = format!(
-                            "https://docs.google.com/presentation/d/{}/export?format={}",
-                            fid, fmt
+                            "https://docs.google.com/presentation/d/{fid}/export?format={fmt}"
                         );
                         continue;
                     }
@@ -401,9 +414,9 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
                     if let Some(ref rk) = resource_key {
                         if !new_url.contains("resourcekey=") {
                             if new_url.contains('?') {
-                                new_url = format!("{}&resourcekey={}", new_url, rk);
+                                new_url = format!("{new_url}&resourcekey={rk}");
                             } else {
-                                new_url = format!("{}?resourcekey={}", new_url, rk);
+                                new_url = format!("{new_url}?resourcekey={rk}");
                             }
                         }
                     }
@@ -416,47 +429,44 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
                             .or_else(|| get_confirm_token_from_html(&text));
                         if let Some(token) = token {
                             let mut new_url =
-                                format!("https://drive.google.com/uc?export=download&id={}&confirm={}", fid, token);
+                                format!("https://drive.google.com/uc?export=download&id={fid}&confirm={token}");
                             if let Some(ref rk) = resource_key {
-                                new_url = format!("{}&resourcekey={}", new_url, rk);
+                                new_url = format!("{new_url}&resourcekey={rk}");
                             }
                             current_url = new_url;
                             continue;
                         }
                     }
                     let message = format!(
-                        "Failed to retrieve file url:\n\n\t{}\n\n\
+                        "Failed to retrieve file url:\n\n\t{e}\n\n\
                          You may still be able to access the file from the browser:\
-                         \n\n\t{}\n\n\
-                         but Gdown can't. Please check connections and permissions.",
-                        e, url_origin
+                         \n\n\t{url_origin}\n\n\
+                         but Gdown can't. Please check connections and permissions."
                     );
                     return Err(Error::FileURLRetrieval(message));
                 }
             }
-        } else {
-            // Check Content-Disposition for pptx redirect
-            if let Some(cd) = res.headers().get("Content-Disposition") {
-                if let Ok(cd_str) = cd.to_str() {
-                    if cd_str.ends_with("pptx") {
-                        if let Some(ref fmt) = opts.format {
-                            if fmt != "pptx" {
-                                if let Some(ref fid) = gdrive_file_id {
-                                    current_url = format!(
-                                        "https://docs.google.com/presentation/d/{}/export?format={}",
-                                        fid, fmt
-                                    );
-                                    continue;
-                                }
+        }
+        // Check Content-Disposition for pptx redirect
+        if let Some(cd) = res.headers().get("Content-Disposition") {
+            if let Ok(cd_str) = cd.to_str() {
+                if cd_str.ends_with("pptx") {
+                    if let Some(ref fmt) = opts.format {
+                        if fmt != "pptx" {
+                            if let Some(ref fid) = gdrive_file_id {
+                                current_url = format!(
+                                    "https://docs.google.com/presentation/d/{fid}/export?format={fmt}"
+                                );
+                                continue;
                             }
                         }
                     }
                 }
             }
-
-            // For non-html, non-gdrive content, just break
-            break;
         }
+
+        // For non-html, non-gdrive content, just break
+        break;
     }
 
     // Determine filename
@@ -469,16 +479,19 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
         let url_path = Url::parse(&current_url)
             .map(|u| u.path().to_string())
             .unwrap_or_default();
-        let basename = Path::new(&url_path)
-            .file_name()
-            .map(|f| f.to_string_lossy().to_string())
-            .unwrap_or_else(|| "download".to_string());
+        let basename = Path::new(&url_path).file_name().map_or_else(
+            || "download".to_string(),
+            |f| f.to_string_lossy().to_string(),
+        );
         filename_from_url = Some(sanitize_path_component(&basename));
     }
 
     let filename_from_url = filename_from_url.unwrap_or_else(|| "download".to_string());
 
-    let mut output = opts.output.clone().unwrap_or_else(|| filename_from_url.clone());
+    let mut output = opts
+        .output
+        .clone()
+        .unwrap_or_else(|| filename_from_url.clone());
     let output_is_stdout = output == "-";
     let output_is_path = !output_is_stdout;
 
@@ -487,7 +500,10 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
         if !output_dir.exists() {
             fs::create_dir_all(output_dir)?;
         }
-        output = output_dir.join(&filename_from_url).to_string_lossy().to_string();
+        output = output_dir
+            .join(&filename_from_url)
+            .to_string_lossy()
+            .to_string();
     }
 
     let mut resume = opts.resume;
@@ -501,11 +517,11 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
 
         if !opts.quiet {
             eprintln!("Downloading...");
-            if url_origin != current_url {
-                eprintln!("From (original): {}", url_origin);
-                eprintln!("From (redirected): {}", current_url);
+            if url_origin == current_url {
+                eprintln!("From: {current_url}");
             } else {
-                eprintln!("From: {}", current_url);
+                eprintln!("From (original): {url_origin}");
+                eprintln!("From (redirected): {current_url}");
             }
             eprintln!("To: <stdout>");
         }
@@ -516,7 +532,9 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.parse::<u64>().ok());
 
-        let pbar = if !opts.quiet {
+        let pbar = if opts.quiet {
+            None
+        } else {
             let pb = if let Some(total) = total {
                 ProgressBar::new(total)
             } else {
@@ -529,8 +547,6 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
                     .progress_chars("#>-"),
             );
             Some(pb)
-        } else {
-            None
         };
 
         let t_start = Instant::now();
@@ -553,6 +569,10 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
             }
             if let Some(speed_limit) = opts.speed {
                 let elapsed = t_start.elapsed().as_secs_f64();
+                #[allow(
+                    clippy::cast_precision_loss,
+                    reason = "Speed limiting uses approximate floating point timing; minor precision loss is acceptable for throttling"
+                )]
                 let expected = downloaded as f64 / speed_limit;
                 if elapsed < expected {
                     std::thread::sleep(Duration::from_secs_f64(expected - elapsed));
@@ -569,7 +589,7 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
         let output_path = Path::new(&output);
         if resume && output_path.is_file() {
             if !opts.quiet {
-                eprintln!("Skipping already downloaded file {}", output);
+                eprintln!("Skipping already downloaded file {output}");
             }
             return Ok(Some(output));
         }
@@ -577,8 +597,7 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
         // Look for existing .part files
         let dir = output_path
             .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| PathBuf::from("."));
+            .map_or_else(|| PathBuf::from("."), std::path::Path::to_path_buf);
         let basename = output_path
             .file_name()
             .map(|f| f.to_string_lossy().to_string())
@@ -589,7 +608,11 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
             if let Ok(entries) = fs::read_dir(&dir) {
                 for entry in entries.flatten() {
                     let fname = entry.file_name().to_string_lossy().to_string();
-                    if fname.starts_with(&basename) && fname.ends_with(".part") {
+                    if fname.starts_with(&basename)
+                        && Path::new(&fname)
+                            .extension()
+                            .is_some_and(|ext| ext.eq_ignore_ascii_case("part"))
+                    {
                         existing_tmp_files.push(entry.path());
                     }
                 }
@@ -609,16 +632,15 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
                 eprintln!("Please remove them except one to resume downloading.");
                 return Ok(None);
             }
-            tmp_file = match existing_tmp_files.into_iter().next() {
-                Some(p) => p,
-                None => {
-                    resume = false;
-                    dir.join(format!("{}.part", basename))
-                }
+            tmp_file = if let Some(p) = existing_tmp_files.into_iter().next() {
+                p
+            } else {
+                resume = false;
+                dir.join(format!("{basename}.part"))
             };
         } else {
             resume = false;
-            tmp_file = dir.join(format!("{}.part", basename));
+            tmp_file = dir.join(format!("{basename}.part"));
         }
 
         // Open tmp file for appending
@@ -631,15 +653,12 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
         if start_size > 0 && resume {
             // Re-request with Range header
             let mut headers = HeaderMap::new();
-            let range_value = format!("bytes={}-", start_size);
+            let range_value = format!("bytes={start_size}-");
             let header_value: HeaderValue = range_value
                 .parse()
-                .map_err(|e| Error::ParseError(format!("Invalid header value: {}", e)))?;
+                .map_err(|e| Error::ParseError(format!("Invalid header value: {e}")))?;
             headers.insert(RANGE, header_value);
-            res = client
-                .get(&current_url)
-                .headers(headers)
-                .send()?;
+            res = client.get(&current_url).headers(headers).send()?;
 
             // If server ignores Range and returns full content, restart cleanly.
             if res.status().as_u16() == 200 {
@@ -659,14 +678,14 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
             if resume {
                 eprintln!("Resume: {}", tmp_file.display());
             }
-            if url_origin != current_url {
-                eprintln!("From (original): {}", url_origin);
-                eprintln!("From (redirected): {}", current_url);
+            if url_origin == current_url {
+                eprintln!("From: {current_url}");
             } else {
-                eprintln!("From: {}", current_url);
+                eprintln!("From (original): {url_origin}");
+                eprintln!("From (redirected): {current_url}");
             }
-            let abs_output = std::fs::canonicalize(&output)
-                .unwrap_or_else(|_| PathBuf::from(&output));
+            let abs_output =
+                std::fs::canonicalize(&output).unwrap_or_else(|_| PathBuf::from(&output));
             eprintln!("To: {}", abs_output.display());
         }
 
@@ -677,7 +696,9 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
             .and_then(|v| v.parse::<u64>().ok())
             .map(|v| v + start_size);
 
-        let pbar = if !opts.quiet {
+        let pbar = if opts.quiet {
+            None
+        } else {
             let pb = if let Some(total) = total {
                 ProgressBar::new(total)
             } else {
@@ -691,8 +712,6 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
             );
             pb.set_position(start_size);
             Some(pb)
-        } else {
-            None
         };
 
         let t_start = Instant::now();
@@ -714,6 +733,10 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
             }
             if let Some(speed_limit) = opts.speed {
                 let elapsed = t_start.elapsed().as_secs_f64();
+                #[allow(
+                    clippy::cast_precision_loss,
+                    reason = "Speed limiting uses approximate floating point timing; minor precision loss is acceptable for throttling"
+                )]
                 let expected = downloaded as f64 / speed_limit;
                 if elapsed < expected {
                     std::thread::sleep(Duration::from_secs_f64(expected - elapsed));
@@ -732,4 +755,3 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
 
     Ok(Some(output))
 }
-

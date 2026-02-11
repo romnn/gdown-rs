@@ -17,37 +17,37 @@ fn parse_file_size(s: &str) -> Result<f64, String> {
     } else if let Some(prefix) = s.strip_suffix('B') {
         (prefix, "B")
     } else {
-        return Err(format!(
-            "Invalid size format: '{}'. Use e.g. 10MB, 256KB",
-            s
-        ));
+        return Err(format!("Invalid size format: '{s}'. Use e.g. 10MB, 256KB"));
     };
 
     if num_str.is_empty() || !num_str.chars().all(|c| c.is_ascii_digit()) {
-        return Err(format!("Invalid number: {}", num_str));
+        return Err(format!("Invalid number: {num_str}"));
     }
 
     let size: f64 = num_str
         .parse()
-        .map_err(|_| format!("Invalid number: {}", num_str))?;
+        .map_err(|_| format!("Invalid number: {num_str}"))?;
     let bytes = match unit {
         "B" => size,
         "KB" => size * 1024.0,
         "MB" => size * 1024.0 * 1024.0,
         "GB" => size * 1024.0 * 1024.0 * 1024.0,
-        _ => {
-            return Err(format!(
-                "Invalid size unit: '{}'. Use e.g. 10MB, 256KB",
-                unit
-            ))
-        }
+        _ => return Err(format!("Invalid size unit: '{unit}'. Use e.g. 10MB, 256KB")),
     };
 
     Ok(bytes)
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "gdown", version, about = "Download files from Google Drive and other URLs")]
+#[command(
+    name = "gdown",
+    version,
+    about = "Download files from Google Drive and other URLs"
+)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "CLI flag structs naturally contain many booleans; refactoring into enums/state machines would hurt ergonomics"
+)]
 struct Cli {
     /// URL or file/folder ID to download from
     url_or_id: String,
@@ -106,7 +106,8 @@ fn main() {
     let cli = Cli::parse();
 
     // Determine if input is URL or ID
-    let (url, id) = if cli.url_or_id.starts_with("http://") || cli.url_or_id.starts_with("https://") {
+    let (url, id) = if cli.url_or_id.starts_with("http://") || cli.url_or_id.starts_with("https://")
+    {
         (Some(cli.url_or_id.clone()), None)
     } else {
         (None, Some(cli.url_or_id.clone()))
@@ -149,19 +150,18 @@ fn main() {
     if let Err(e) = result {
         match e {
             Error::FileURLRetrieval(ref msg) => {
-                eprintln!("{}", msg);
+                eprintln!("{msg}");
                 process::exit(1);
             }
             Error::FolderContentsMaximumLimit(ref msg) => {
                 eprintln!(
-                    "Failed to retrieve folder contents:\n\n\t{}\n\n\
-                     You can use `--remaining-ok` option to ignore this error.",
-                    msg
+                    "Failed to retrieve folder contents:\n\n\t{msg}\n\n\
+                     You can use `--remaining-ok` option to ignore this error."
                 );
                 process::exit(1);
             }
             _ => {
-                eprintln!("Error:\n\n\t{}", e);
+                eprintln!("Error:\n\n\t{e}");
                 process::exit(1);
             }
         }
