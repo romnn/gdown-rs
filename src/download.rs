@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Read;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -6,7 +7,7 @@ use std::time::{Duration, Instant};
 use indicatif::{ProgressBar, ProgressStyle};
 use regex::Regex;
 use reqwest::blocking::{Client, ClientBuilder, Response};
-use reqwest::header::HeaderMap;
+use reqwest::header::{HeaderMap, HeaderValue, RANGE, SET_COOKIE};
 use scraper::{Html, Selector};
 use url::Url;
 
@@ -14,72 +15,100 @@ use crate::error::{Error, Result};
 use crate::parse_url::parse_url;
 
 pub const CHUNK_SIZE: usize = 512 * 1024; // 512KB
-
 pub const DEFAULT_FILE_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) \
     AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36";
-
 pub const DEFAULT_FOLDER_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) \
     AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36";
+const MAX_HTML_BYTES: usize = 512 * 1024;
+
+fn sanitize_path_component(name: &str) -> String {
+    let cleaned = name
+        .trim()
+        .trim_matches(['\'', '"'])
+        .replace(['/', '\\'], "_")
+        .replace('\u{00A0}', " ");
+    let cleaned = cleaned.trim();
+    if cleaned.is_empty() || cleaned == "." || cleaned == ".." {
+        "_".to_string()
+    } else {
+        cleaned.to_string()
+    }
+}
 
 /// Extract the download URL from a Google Drive confirmation page.
 pub fn get_url_from_gdrive_confirmation(contents: &str) -> Result<String> {
-    for line in contents.lines() {
-        // Check for /uc?export=download link
-        let re = Regex::new(r#"href="(/uc\?export=download[^"]+)"#).unwrap();
-        if let Some(caps) = re.captures(line) {
-            let url = format!("https://docs.google.com{}", &caps[1]);
+    let uc_export_re = Regex::new(r#"href="(/uc\?export=download[^"]+)"#)
+        .map_err(|e| Error::ParseError(format!("Failed to compile regex: {}", e)))?;
+    let download_url_re = Regex::new(r#"\"downloadUrl\":\"([^"]+)\""#)
+        .map_err(|e| Error::ParseError(format!("Failed to compile regex: {}", e)))?;
+    let error_subcaption_re = Regex::new(r#"<p class=\"uc-error-subcaption\">(.*)</p>"#)
+        .map_err(|e| Error::ParseError(format!("Failed to compile regex: {}", e)))?;
+    let form_selector = Selector::parse("#download-form")
+        .map_err(|e| Error::ParseError(format!("Failed to parse selector: {}", e)))?;
+    let input_selector = Selector::parse(r#"input[type="hidden"]"#)
+        .map_err(|e| Error::ParseError(format!("Failed to parse selector: {}", e)))?;
+
+    if let Some(caps) = uc_export_re.captures(contents) {
+        if let Some(m) = caps.get(1) {
+            let url = format!("https://docs.google.com{}", m.as_str());
             let url = url.replace("&amp;", "&");
             return Ok(url);
         }
+    }
 
-        // Check for download-form
-        let document = Html::parse_fragment(line);
-        let form_selector = Selector::parse("#download-form").unwrap();
-        if let Some(form) = document.select(&form_selector).next() {
-            let action = form
-                .value()
-                .attr("action")
-                .unwrap_or("")
-                .replace("&amp;", "&");
-            let mut parsed = Url::parse(&action).map_err(|e| {
-                Error::FileURLRetrieval(format!("Failed to parse form action URL: {}", e))
-            })?;
+    let document = Html::parse_document(contents);
+    if let Some(form) = document.select(&form_selector).next() {
+        let action = form
+            .value()
+            .attr("action")
+            .unwrap_or("")
+            .replace("&amp;", "&");
 
-            // Collect hidden input fields
-            let input_selector =
-                Selector::parse(r#"input[type="hidden"]"#).unwrap();
-            let mut query_pairs: Vec<(String, String)> = parsed
-                .query_pairs()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect();
-
-            for input in document.select(&input_selector) {
-                if let (Some(name), Some(value)) =
-                    (input.value().attr("name"), input.value().attr("value"))
-                {
-                    // Remove existing entries with same name, then add new one
-                    query_pairs.retain(|(k, _)| k != name);
-                    query_pairs.push((name.to_string(), value.to_string()));
-                }
+        let parsed_result = Url::parse(&action).or_else(|_| {
+            if action.starts_with('/') {
+                Url::parse(&format!("https://docs.google.com{}", action))
+            } else {
+                Url::parse(&format!("https://docs.google.com/{}", action))
             }
+        });
 
-            parsed.query_pairs_mut().clear().extend_pairs(&query_pairs);
-            return Ok(parsed.to_string());
+        let mut parsed = parsed_result.map_err(|e| {
+            Error::FileURLRetrieval(format!("Failed to parse form action URL: {}", e))
+        })?;
+
+        // Collect hidden input fields
+        let mut query_pairs: Vec<(String, String)> = parsed
+            .query_pairs()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+
+        for input in form.select(&input_selector) {
+            if let (Some(name), Some(value)) =
+                (input.value().attr("name"), input.value().attr("value"))
+            {
+                // Remove existing entries with same name, then add new one
+                query_pairs.retain(|(k, _)| k != name);
+                query_pairs.push((name.to_string(), value.to_string()));
+            }
         }
 
-        // Check for downloadUrl in JSON
-        let re = Regex::new(r#""downloadUrl":"([^"]+)"#).unwrap();
-        if let Some(caps) = re.captures(line) {
-            let url = caps[1]
+        parsed.query_pairs_mut().clear().extend_pairs(&query_pairs);
+        return Ok(parsed.to_string());
+    }
+
+    if let Some(caps) = download_url_re.captures(contents) {
+        if let Some(m) = caps.get(1) {
+            let url = m
+                .as_str()
                 .replace("\\u003d", "=")
                 .replace("\\u0026", "&");
             return Ok(url);
         }
+    }
 
-        // Check for error message
-        let re = Regex::new(r#"<p class="uc-error-subcaption">(.*)</p>"#).unwrap();
-        if let Some(caps) = re.captures(line) {
-            return Err(Error::FileURLRetrieval(caps[1].to_string()));
+    if let Some(caps) = error_subcaption_re.captures(contents) {
+        if let Some(m) = caps.get(1) {
+            return Err(Error::FileURLRetrieval(m.as_str().to_string()));
         }
     }
 
@@ -98,19 +127,92 @@ pub fn get_filename_from_response(response: &Response) -> Option<String> {
     let cd_str = urlencoding::decode(content_disposition.to_str().ok()?).ok()?;
 
     // Try filename*=UTF-8'' format
-    let re = Regex::new(r"filename\*=UTF-8''(.*)").unwrap();
-    if let Some(caps) = re.captures(&cd_str) {
-        let filename = caps[1].replace(std::path::MAIN_SEPARATOR, "_");
-        return Some(filename);
+    if let Some((_, rest)) = cd_str.split_once("filename*=UTF-8''") {
+        let filename = sanitize_path_component(rest);
+        if !filename.is_empty() {
+            return Some(filename);
+        }
     }
 
     // Try filename="..." format
-    let re = Regex::new(r#"attachment; filename="(.*?)""#).unwrap();
-    if let Some(caps) = re.captures(&cd_str) {
-        return Some(caps[1].to_string());
+    if let Some((_, rest)) = cd_str.split_once("attachment; filename=\"") {
+        if let Some((filename, _)) = rest.split_once('"') {
+            let filename = sanitize_path_component(filename);
+            if !filename.is_empty() {
+                return Some(filename);
+            }
+        }
     }
 
     None
+}
+
+fn extract_resource_key(url: &str) -> Option<String> {
+    Url::parse(url).ok().and_then(|u| {
+        u.query_pairs()
+            .find(|(k, _)| k.as_ref() == "resourcekey")
+            .map(|(_, v)| v.into_owned())
+    })
+}
+
+fn get_confirm_token_from_headers(headers: &HeaderMap) -> Option<String> {
+    for value in headers.get_all(SET_COOKIE).iter() {
+        let Ok(cookie) = value.to_str() else {
+            continue;
+        };
+
+        if let Some((name, rest)) = cookie.split_once('=') {
+            if name.starts_with("download_warning") {
+                let token = rest.split(';').next().unwrap_or("").trim();
+                if !token.is_empty() {
+                    return Some(token.to_string());
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn get_confirm_token_from_html(html: &str) -> Option<String> {
+    let html = html.replace("&amp;", "&");
+    let needle = "confirm=";
+
+    let mut tokens: Vec<String> = Vec::new();
+    let mut search_start = 0usize;
+    while let Some(relative_pos) = html
+        .get(search_start..)
+        .and_then(|s| s.find(needle))
+    {
+        let start = search_start.saturating_add(relative_pos).saturating_add(needle.len());
+        let rest = match html.get(start..) {
+            Some(r) => r,
+            None => break,
+        };
+        let end = rest
+            .find(|c: char| c == '&' || c == '"' || c == '\'' || c.is_whitespace())
+            .unwrap_or(rest.len());
+
+        let token = rest.get(..end).unwrap_or("").trim();
+        if !token.is_empty() {
+            tokens.push(token.to_string());
+        }
+
+        search_start = start;
+        if search_start >= html.len() {
+            break;
+        }
+    }
+
+    tokens.retain(|t| t != "t");
+    tokens.sort_by_key(|t| t.len());
+    tokens.pop()
+}
+
+fn read_response_text_limited(res: Response) -> Result<String> {
+    let mut bytes = Vec::<u8>::new();
+    res.take(MAX_HTML_BYTES as u64).read_to_end(&mut bytes)?;
+    Ok(String::from_utf8_lossy(&bytes).to_string())
 }
 
 /// Build an HTTP client (session equivalent).
@@ -127,7 +229,7 @@ pub fn build_client(
 
     if let Some(proxy_url) = proxy {
         let proxy = reqwest::Proxy::all(proxy_url)
-            .map_err(|e| Error::Http(e))?;
+            .map_err(Error::Http)?;
         builder = builder.proxy(proxy);
         eprintln!("Using proxy: {}", proxy_url);
     }
@@ -185,10 +287,14 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
         ));
     }
 
-    let mut url = if let Some(ref id) = opts.id {
-        format!("https://drive.google.com/uc?id={}", id)
-    } else {
-        opts.url.clone().unwrap()
+    let mut url = match (&opts.id, &opts.url) {
+        (Some(id), None) => format!("https://drive.google.com/uc?id={}", id),
+        (None, Some(u)) => u.clone(),
+        _ => {
+            return Err(Error::InvalidInput(
+                "Either url or id has to be specified".to_string(),
+            ))
+        }
     };
 
     let user_agent = opts
@@ -197,6 +303,7 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
         .unwrap_or(DEFAULT_FILE_USER_AGENT);
 
     let url_origin = url.clone();
+    let resource_key = extract_resource_key(&url_origin);
 
     let client = build_client(
         opts.proxy.as_deref(),
@@ -210,6 +317,9 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
     if opts.fuzzy {
         if let Some(ref fid) = gdrive_file_id {
             url = format!("https://drive.google.com/uc?id={}", fid);
+            if let Some(ref rk) = resource_key {
+                url = format!("{}&resourcekey={}", url, rk);
+            }
         }
     }
 
@@ -220,6 +330,9 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
     };
 
     let url_after_fuzzy = url.clone();
+
+    let title_re = Regex::new(r"<title>(.+)</title>")
+        .map_err(|e| Error::ParseError(format!("Failed to compile regex: {}", e)))?;
 
     // Re-assign for the loop
     let mut current_url = url;
@@ -235,6 +348,9 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
         if current_url == url_after_fuzzy && res.status().as_u16() == 500 {
             if let Some(ref fid) = gdrive_file_id {
                 current_url = format!("https://drive.google.com/open?id={}", fid);
+                if let Some(ref rk) = resource_key {
+                    current_url = format!("{}&resourcekey={}", current_url, rk);
+                }
                 continue;
             }
         }
@@ -247,10 +363,10 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
             .to_string();
 
         if content_type.starts_with("text/html") {
-            let text = res.text()?;
-            let re = Regex::new(r"<title>(.+)</title>").unwrap();
-            if let Some(caps) = re.captures(&text) {
-                let title = &caps[1];
+            let headers = res.headers().clone();
+            let text = read_response_text_limited(res)?;
+            if let Some(caps) = title_re.captures(&text) {
+                let title = caps.get(1).map(|m| m.as_str()).unwrap_or("");
                 if let Some(ref fid) = gdrive_file_id {
                     if title.ends_with(" - Google Docs") {
                         let fmt = opts.format.as_deref().unwrap_or("docx");
@@ -281,10 +397,33 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
             // Need to redirect with confirmation
             match get_url_from_gdrive_confirmation(&text) {
                 Ok(new_url) => {
+                    let mut new_url = new_url;
+                    if let Some(ref rk) = resource_key {
+                        if !new_url.contains("resourcekey=") {
+                            if new_url.contains('?') {
+                                new_url = format!("{}&resourcekey={}", new_url, rk);
+                            } else {
+                                new_url = format!("{}?resourcekey={}", new_url, rk);
+                            }
+                        }
+                    }
                     current_url = new_url;
                     continue;
                 }
                 Err(e) => {
+                    if let Some(ref fid) = gdrive_file_id {
+                        let token = get_confirm_token_from_headers(&headers)
+                            .or_else(|| get_confirm_token_from_html(&text));
+                        if let Some(token) = token {
+                            let mut new_url =
+                                format!("https://drive.google.com/uc?export=download&id={}&confirm={}", fid, token);
+                            if let Some(ref rk) = resource_key {
+                                new_url = format!("{}&resourcekey={}", new_url, rk);
+                            }
+                            current_url = new_url;
+                            continue;
+                        }
+                    }
                     let message = format!(
                         "Failed to retrieve file url:\n\n\t{}\n\n\
                          You may still be able to access the file from the browser:\
@@ -315,11 +454,6 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
                 }
             }
 
-            // Check if Content-Disposition is present -> file is ready
-            if res.headers().contains_key("Content-Disposition") {
-                break;
-            }
-
             // For non-html, non-gdrive content, just break
             break;
         }
@@ -339,15 +473,16 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
             .file_name()
             .map(|f| f.to_string_lossy().to_string())
             .unwrap_or_else(|| "download".to_string());
-        filename_from_url = Some(basename);
+        filename_from_url = Some(sanitize_path_component(&basename));
     }
 
-    let filename_from_url = filename_from_url.unwrap();
+    let filename_from_url = filename_from_url.unwrap_or_else(|| "download".to_string());
 
     let mut output = opts.output.clone().unwrap_or_else(|| filename_from_url.clone());
-    let output_is_path = true; // In Rust port we always use paths (no stdout buffer support in lib)
+    let output_is_stdout = output == "-";
+    let output_is_path = !output_is_stdout;
 
-    if output.ends_with(std::path::MAIN_SEPARATOR) {
+    if output_is_path && output.ends_with(std::path::MAIN_SEPARATOR) {
         let output_dir = Path::new(&output);
         if !output_dir.exists() {
             fs::create_dir_all(output_dir)?;
@@ -357,7 +492,80 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
 
     let mut resume = opts.resume;
 
-    if output_is_path {
+    if output_is_stdout {
+        if opts.resume {
+            return Err(Error::InvalidInput(
+                "Cannot use --continue when output is '-'".to_string(),
+            ));
+        }
+
+        if !opts.quiet {
+            eprintln!("Downloading...");
+            if url_origin != current_url {
+                eprintln!("From (original): {}", url_origin);
+                eprintln!("From (redirected): {}", current_url);
+            } else {
+                eprintln!("From: {}", current_url);
+            }
+            eprintln!("To: <stdout>");
+        }
+
+        let total = res
+            .headers()
+            .get("Content-Length")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok());
+
+        let pbar = if !opts.quiet {
+            let pb = if let Some(total) = total {
+                ProgressBar::new(total)
+            } else {
+                ProgressBar::new_spinner()
+            };
+            pb.set_style(
+                ProgressStyle::default_bar()
+                    .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec})")
+                    .unwrap_or_else(|_| ProgressStyle::default_bar())
+                    .progress_chars("#>-"),
+            );
+            Some(pb)
+        } else {
+            None
+        };
+
+        let t_start = Instant::now();
+        let mut downloaded: u64 = 0;
+        let mut buf = vec![0u8; CHUNK_SIZE];
+        let mut out = std::io::stdout().lock();
+
+        loop {
+            let bytes_read = std::io::Read::read(&mut res, &mut buf)?;
+            if bytes_read == 0 {
+                break;
+            }
+            let chunk = buf
+                .get(..bytes_read)
+                .ok_or_else(|| Error::ParseError("Unexpected read size".to_string()))?;
+            out.write_all(chunk)?;
+            downloaded += bytes_read as u64;
+            if let Some(ref pb) = pbar {
+                pb.set_position(downloaded);
+            }
+            if let Some(speed_limit) = opts.speed {
+                let elapsed = t_start.elapsed().as_secs_f64();
+                let expected = downloaded as f64 / speed_limit;
+                if elapsed < expected {
+                    std::thread::sleep(Duration::from_secs_f64(expected - elapsed));
+                }
+            }
+        }
+
+        if let Some(pb) = pbar {
+            pb.finish();
+        }
+
+        return Ok(None);
+    } else if output_is_path {
         let output_path = Path::new(&output);
         if resume && output_path.is_file() {
             if !opts.quiet {
@@ -401,7 +609,13 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
                 eprintln!("Please remove them except one to resume downloading.");
                 return Ok(None);
             }
-            tmp_file = existing_tmp_files.into_iter().next().unwrap();
+            tmp_file = match existing_tmp_files.into_iter().next() {
+                Some(p) => p,
+                None => {
+                    resume = false;
+                    dir.join(format!("{}.part", basename))
+                }
+            };
         } else {
             resume = false;
             tmp_file = dir.join(format!("{}.part", basename));
@@ -413,18 +627,31 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
             .append(true)
             .open(&tmp_file)?;
 
-        let start_size = f.metadata()?.len();
+        let mut start_size = f.metadata()?.len();
         if start_size > 0 && resume {
             // Re-request with Range header
             let mut headers = HeaderMap::new();
-            headers.insert(
-                "Range",
-                format!("bytes={}-", start_size).parse().unwrap(),
-            );
+            let range_value = format!("bytes={}-", start_size);
+            let header_value: HeaderValue = range_value
+                .parse()
+                .map_err(|e| Error::ParseError(format!("Invalid header value: {}", e)))?;
+            headers.insert(RANGE, header_value);
             res = client
                 .get(&current_url)
                 .headers(headers)
                 .send()?;
+
+            // If server ignores Range and returns full content, restart cleanly.
+            if res.status().as_u16() == 200 {
+                resume = false;
+                drop(f);
+                let _ = fs::remove_file(&tmp_file);
+                f = fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&tmp_file)?;
+                start_size = 0;
+            }
         }
 
         if !opts.quiet {
@@ -477,7 +704,10 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
             if bytes_read == 0 {
                 break;
             }
-            f.write_all(&buf[..bytes_read])?;
+            let chunk = buf
+                .get(..bytes_read)
+                .ok_or_else(|| Error::ParseError("Unexpected read size".to_string()))?;
+            f.write_all(chunk)?;
             downloaded += bytes_read as u64;
             if let Some(ref pb) = pbar {
                 pb.set_position(start_size + downloaded);

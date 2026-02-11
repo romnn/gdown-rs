@@ -1,68 +1,105 @@
-# gdown-rs
+# gdown (Rust)
 
-A Rust port of [gdown](https://github.com/wkentaro/gdown) — download files and folders from Google Drive shared links.
+This repository is a Rust port of the upstream Python project:
 
-Both a **CLI tool** and a **library crate** for use as a dependency.
+- https://github.com/wkentaro/gdown
 
-## Features
+It provides:
 
-- Download files from Google Drive "anyone with the link" shared links
-- Download entire shared folders (recursively)
-- Download from non-Google-Drive URLs
-- Resume interrupted downloads (`--continue`)
-- Cached downloads with hash verification (md5, sha1, sha256, sha512)
-- Fuzzy file ID extraction from various Google Drive URL formats
-- Google Docs/Sheets/Slides export with custom format
-- Speed limiting
-- Proxy support
-- Archive extraction (zip, tar, tar.gz)
+- A `gdown` **CLI** that mirrors the upstream CLI surface as closely as practical.
+- A `gdown` **library crate** for embedding in other Rust projects.
+
+The main goal is the same as upstream: download files (and folders) from Google Drive links that are shared as **"Anyone with the link"**.
+
+## What it does
+
+- **Google Drive files**
+  - Accepts file IDs (e.g. `1abc...`) and a variety of Google Drive URL shapes.
+  - Handles Google Drive confirmation pages (virus-scan / quota / large file warnings).
+  - Supports Google Docs/Sheets/Slides export via `--format`.
+
+- **Google Drive folders**
+  - Accepts folder IDs and folder URLs.
+  - Recursively downloads the folder tree.
+  - Matches upstream’s “max 50 entries” behavior unless `--remaining-ok` is passed.
+
+- **Streaming by default**
+  - File bodies are streamed to disk (or stdout) using a fixed-size buffer.
+  - Confirmation HTML pages are read with a hard limit (`512KiB`) to avoid accidental RAM blowups.
 
 ## Installation
 
+### Homebrew (recommended)
+
+If you maintain a tap/formula, install it like:
+
 ```bash
-cargo install --path .
+brew install gdown
 ```
 
-## CLI Usage
+If you don’t have a brew formula yet, you can install via Cargo.
+
+### Cargo
 
 ```bash
-# Download a file by URL
-gdown "https://drive.google.com/uc?id=FILE_ID"
+cargo install --locked --path .
+```
 
-# Download a file by ID
+## CLI usage
+
+### Download a file
+
+```bash
 gdown FILE_ID
-
-# Download to a specific path
-gdown FILE_ID -O output.txt
-
-# Download a shared folder
-gdown "https://drive.google.com/drive/folders/FOLDER_ID?usp=sharing" --folder
-
-# Download a folder by ID
-gdown FOLDER_ID --folder -O ./output_dir/
-
-# Resume a partial download
-gdown FILE_ID -O output.txt --continue
-
-# Fuzzy URL matching
+gdown "https://drive.google.com/uc?id=FILE_ID"
 gdown "https://drive.google.com/file/d/FILE_ID/view?usp=sharing" --fuzzy
+```
 
-# Export Google Docs as PDF
+### Choose output path
+
+```bash
+gdown FILE_ID -O output.bin
+gdown FILE_ID -O ./downloads/
+```
+
+### Stream to stdout
+
+```bash
+gdown FILE_ID -O - > output.bin
+```
+
+### Resume
+
+```bash
+gdown FILE_ID -O output.bin --continue
+```
+
+### Download a folder
+
+```bash
+gdown FOLDER_ID --folder -O ./out/
+gdown "https://drive.google.com/drive/folders/FOLDER_ID?usp=sharing" --folder -O ./out/
+```
+
+### Export Google Docs/Sheets/Slides
+
+```bash
 gdown DOC_ID --format pdf
+gdown SHEET_ID --format xlsx
+gdown SLIDES_ID --format pdf
+```
 
-# Quiet mode
-gdown FILE_ID -q
+### Proxy / TLS / speed limiting
 
-# With proxy
+```bash
 gdown FILE_ID --proxy http://proxy:8080
-
-# Speed limit
+gdown FILE_ID --no-check-certificate
 gdown FILE_ID --speed 10MB
 ```
 
-## Library Usage
+## Library usage
 
-Add to your `Cargo.toml`:
+Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
@@ -74,13 +111,17 @@ gdown = { path = "." }
 ```rust
 use gdown::{download, DownloadOptions};
 
-let opts = DownloadOptions {
-    url: Some("https://drive.google.com/uc?id=FILE_ID".into()),
-    output: Some("output.txt".into()),
-    quiet: true,
-    ..DownloadOptions::default()
-};
-let result = download(&opts).unwrap();
+fn main() -> Result<(), gdown::Error> {
+    let opts = DownloadOptions {
+        url: Some("https://drive.google.com/uc?id=FILE_ID".to_string()),
+        output: Some("output.bin".to_string()),
+        quiet: true,
+        ..DownloadOptions::default()
+    };
+
+    let _path = download(&opts)?;
+    Ok(())
+}
 ```
 
 ### Download a folder
@@ -88,43 +129,29 @@ let result = download(&opts).unwrap();
 ```rust
 use gdown::{download_folder, DownloadFolderOptions};
 
-let opts = DownloadFolderOptions {
-    url: Some("https://drive.google.com/drive/folders/FOLDER_ID".into()),
-    output: Some("./output/".into()),
-    ..DownloadFolderOptions::default()
-};
-let result = download_folder(&opts).unwrap();
+fn main() -> Result<(), gdown::Error> {
+    let opts = DownloadFolderOptions {
+        url: Some("https://drive.google.com/drive/folders/FOLDER_ID".to_string()),
+        output: Some("./out/".to_string()),
+        ..DownloadFolderOptions::default()
+    };
+
+    let _result = download_folder(&opts)?;
+    Ok(())
+}
 ```
 
-### Cached download with hash verification
-
-```rust
-use gdown::cached_download::{cached_download, CachedDownloadOptions};
-
-let opts = CachedDownloadOptions {
-    url: Some("https://drive.google.com/uc?id=FILE_ID".into()),
-    hash: Some("md5:abc123...".into()),
-    ..CachedDownloadOptions::default()
-};
-let path = cached_download(&opts).unwrap();
-```
-
-### Parse Google Drive URLs
-
-```rust
-use gdown::parse_url;
-
-let (file_id, is_download_link) = parse_url(
-    "https://drive.google.com/file/d/FILE_ID/view?usp=sharing",
-    false,
-);
-```
-
-## Testing
+## Tests
 
 ```bash
 cargo test
+cargo clippy --all-targets
 ```
+
+## Notes / differences from upstream
+
+- This port aims to match upstream behavior closely, but it is not a byte-for-byte reimplementation.
+- Folder listings follow upstream’s pragmatic limitation (50 items per folder page) unless overridden with `--remaining-ok`.
 
 ## License
 

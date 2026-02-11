@@ -1,29 +1,48 @@
 use std::process;
 
 use clap::Parser;
-use regex::Regex;
-
 use gdown::download_folder::DownloadFolderOptions;
 use gdown::error::Error;
 use gdown::{download, DownloadOptions};
 
 /// Parse a file size string like "10MB" into bytes.
 fn parse_file_size(s: &str) -> Result<f64, String> {
-    let re = Regex::new(r"^([0-9]+)(GB|MB|KB|B)$").unwrap();
-    let caps = re
-        .captures(s)
-        .ok_or_else(|| format!("Invalid size format: '{}'. Use e.g. 10MB, 256KB", s))?;
-    let size: f64 = caps[1]
+    let s = s.trim();
+    let (num_str, unit) = if let Some(prefix) = s.strip_suffix("GB") {
+        (prefix, "GB")
+    } else if let Some(prefix) = s.strip_suffix("MB") {
+        (prefix, "MB")
+    } else if let Some(prefix) = s.strip_suffix("KB") {
+        (prefix, "KB")
+    } else if let Some(prefix) = s.strip_suffix('B') {
+        (prefix, "B")
+    } else {
+        return Err(format!(
+            "Invalid size format: '{}'. Use e.g. 10MB, 256KB",
+            s
+        ));
+    };
+
+    if num_str.is_empty() || !num_str.chars().all(|c| c.is_ascii_digit()) {
+        return Err(format!("Invalid number: {}", num_str));
+    }
+
+    let size: f64 = num_str
         .parse()
-        .map_err(|_| format!("Invalid number: {}", &caps[1]))?;
-    let unit = &caps[2];
+        .map_err(|_| format!("Invalid number: {}", num_str))?;
     let bytes = match unit {
         "B" => size,
         "KB" => size * 1024.0,
         "MB" => size * 1024.0 * 1024.0,
         "GB" => size * 1024.0 * 1024.0 * 1024.0,
-        _ => unreachable!(),
+        _ => {
+            return Err(format!(
+                "Invalid size unit: '{}'. Use e.g. 10MB, 256KB",
+                unit
+            ))
+        }
     };
+
     Ok(bytes)
 }
 
@@ -87,7 +106,7 @@ fn main() {
     let cli = Cli::parse();
 
     // Determine if input is URL or ID
-    let (url, id) = if Regex::new(r"^https?://").unwrap().is_match(&cli.url_or_id) {
+    let (url, id) = if cli.url_or_id.starts_with("http://") || cli.url_or_id.starts_with("https://") {
         (Some(cli.url_or_id.clone()), None)
     } else {
         (None, Some(cli.url_or_id.clone()))

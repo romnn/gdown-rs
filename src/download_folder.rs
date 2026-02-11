@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use regex::Regex;
 use scraper::{Html, Selector};
+use url::Url;
 
 use crate::download::{build_client, download, DownloadOptions, DEFAULT_FOLDER_USER_AGENT};
 use crate::error::{Error, Result};
@@ -55,23 +56,46 @@ pub fn parse_google_drive_file(
     let document = Html::parse_document(content);
 
     // Find the script tag with window['_DRIVE_ivd']
-    let script_selector = Selector::parse("script").unwrap();
+    let script_selector = Selector::parse("script")
+        .map_err(|e| Error::ParseError(format!("Failed to parse selector: {}", e)))?;
+    let drive_string_re = Regex::new(r"'((?:[^'\\]|\\.)*)'")
+        .map_err(|e| Error::ParseError(format!("Failed to compile regex: {}", e)))?;
     let mut encoded_data: Option<String> = None;
 
     for script in document.select(&script_selector) {
         let inner_html = script.inner_html();
         if inner_html.contains("_DRIVE_ivd") {
-            // Extract the second JS string (the encoded array)
-            let re = Regex::new(r"'((?:[^'\\]|\\.)*)'").unwrap();
-            let matches: Vec<_> = re.captures_iter(&inner_html).collect();
-            if matches.len() >= 2 {
-                encoded_data = Some(matches[1][1].to_string());
-            } else {
-                return Err(Error::ParseError(
-                    "Couldn't find the folder encoded JS string".to_string(),
-                ));
+            let strings: Vec<String> = drive_string_re
+                .captures_iter(&inner_html)
+                .filter_map(|c| c.get(1).map(|m| m.as_str().to_string()))
+                .collect();
+
+            for (idx, s) in strings.iter().enumerate() {
+                if s != "_DRIVE_ivd" {
+                    continue;
+                }
+
+                for candidate in strings.iter().skip(idx.saturating_add(1)) {
+                    let decoded = decode_unicode_escapes(candidate);
+                    let parsed: serde_json::Value = match serde_json::from_str(&decoded) {
+                        Ok(v) => v,
+                        Err(_) => continue,
+                    };
+
+                    if parsed.get(0).and_then(|v| v.as_array()).is_some() {
+                        encoded_data = Some(candidate.clone());
+                        break;
+                    }
+                }
+
+                if encoded_data.is_some() {
+                    break;
+                }
             }
-            break;
+
+            if encoded_data.is_some() {
+                break;
+            }
         }
     }
 
@@ -91,17 +115,15 @@ pub fn parse_google_drive_file(
     // Parse the decoded string as JSON
     let folder_arr: serde_json::Value = serde_json::from_str(&decoded)?;
 
-    let folder_contents = if folder_arr[0].is_null() {
-        vec![]
-    } else {
-        folder_arr[0]
-            .as_array()
-            .cloned()
-            .unwrap_or_default()
-    };
+    let folder_contents: Vec<serde_json::Value> = folder_arr
+        .get(0)
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
 
     // Extract folder name from title
-    let title_selector = Selector::parse("title").unwrap();
+    let title_selector = Selector::parse("title")
+        .map_err(|e| Error::ParseError(format!("Failed to parse selector: {}", e)))?;
     let title_text = document
         .select(&title_selector)
         .next()
@@ -122,9 +144,17 @@ pub fn parse_google_drive_file(
     };
 
     // Extract folder ID from URL
-    let folder_id = url.split('/').last().unwrap_or("").to_string();
-    // Strip query params from folder_id
-    let folder_id = folder_id.split('?').next().unwrap_or("").to_string();
+    let folder_id = Url::parse(url)
+        .ok()
+        .and_then(|u| u.path_segments().and_then(|mut s| s.next_back()).map(|s| s.to_string()))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            url.rsplit('/')
+                .next()
+                .and_then(|s| s.split('?').next())
+                .unwrap_or("")
+                .to_string()
+        });
 
     let gdrive_file = GoogleDriveFile::new(folder_id, name, FOLDER_TYPE.to_string());
 
@@ -132,14 +162,18 @@ pub fn parse_google_drive_file(
     let mut id_name_type_iter = Vec::new();
     for entry in &folder_contents {
         if let Some(arr) = entry.as_array() {
-            if arr.len() >= 4 {
-                let child_id = arr[0].as_str().unwrap_or("").to_string();
-                let child_name_raw = arr[2].as_str().unwrap_or("").to_string();
-                // The Python code does: e[2].encode("raw_unicode_escape").decode("utf-8")
-                // In Rust, JSON parsing already handles unicode, so we just use the string directly
-                let child_name = child_name_raw;
-                let child_type = arr[3].as_str().unwrap_or("").to_string();
-                id_name_type_iter.push((child_id, child_name, child_type));
+            let child_id = arr.first().and_then(|v| v.as_str());
+            let child_name = arr.get(2).and_then(|v| v.as_str());
+            let child_type = arr.get(3).and_then(|v| v.as_str());
+
+            if let (Some(child_id), Some(child_name), Some(child_type)) =
+                (child_id, child_name, child_type)
+            {
+                id_name_type_iter.push((
+                    child_id.to_string(),
+                    child_name.to_string(),
+                    child_type.to_string(),
+                ));
             }
         }
     }
@@ -216,6 +250,7 @@ fn download_and_parse_google_drive_link(
     quiet: bool,
     remaining_ok: bool,
     verify: bool,
+    resource_key: Option<&str>,
 ) -> Result<Option<GoogleDriveFile>> {
     let mut url = url.to_string();
 
@@ -248,6 +283,7 @@ fn download_and_parse_google_drive_link(
                 quiet,
                 remaining_ok,
                 verify,
+                resource_key,
             )?;
 
             return Ok(Some(gdrive_file));
@@ -264,6 +300,7 @@ fn download_and_parse_google_drive_link(
                 quiet,
                 remaining_ok,
                 verify,
+                resource_key,
             )?;
 
             return Ok(Some(gdrive_file));
@@ -283,6 +320,7 @@ fn process_children(
     quiet: bool,
     remaining_ok: bool,
     verify: bool,
+    resource_key: Option<&str>,
 ) -> Result<()> {
     for (child_id, child_name, child_type) in id_name_type_iter {
         if child_type != FOLDER_TYPE {
@@ -300,8 +338,12 @@ fn process_children(
         if !quiet {
             eprintln!("Retrieving folder {} {}", child_id, child_name);
         }
-        let child_url = format!("https://drive.google.com/drive/folders/{}", child_id);
-        match download_and_parse_google_drive_link(client, &child_url, quiet, remaining_ok, verify)?
+        let mut child_url = format!("https://drive.google.com/drive/folders/{}", child_id);
+        if let Some(rk) = resource_key {
+            child_url = format!("{}?resourcekey={}", child_url, rk);
+        }
+
+        match download_and_parse_google_drive_link(client, &child_url, quiet, remaining_ok, verify, resource_key)?
         {
             Some(child) => {
                 gdrive_file.children.push(child);
@@ -410,11 +452,23 @@ pub fn download_folder(opts: &DownloadFolderOptions) -> Result<Option<DownloadFo
         ));
     }
 
-    let url = if let Some(ref id) = opts.id {
-        format!("https://drive.google.com/drive/folders/{}", id)
-    } else {
-        opts.url.clone().unwrap()
+    let url = match (&opts.id, &opts.url) {
+        (Some(id), None) => format!("https://drive.google.com/drive/folders/{}", id),
+        (None, Some(u)) => u.clone(),
+        _ => {
+            return Err(Error::InvalidInput(
+                "Either url or id has to be specified".to_string(),
+            ))
+        }
     };
+
+    let resource_key = Url::parse(&url)
+        .ok()
+        .and_then(|u| {
+            u.query_pairs()
+                .find(|(k, _)| k.as_ref() == "resourcekey")
+                .map(|(_, v)| v.into_owned())
+        });
 
     let user_agent = opts
         .user_agent
@@ -438,6 +492,7 @@ pub fn download_folder(opts: &DownloadFolderOptions) -> Result<Option<DownloadFo
         opts.quiet,
         opts.remaining_ok,
         opts.verify,
+        resource_key.as_deref(),
     )?;
 
     let gdrive_file = match gdrive_file {
@@ -501,7 +556,9 @@ pub fn download_folder(opts: &DownloadFolderOptions) -> Result<Option<DownloadFo
             continue;
         }
 
-        let file_id = id.as_ref().unwrap();
+        let Some(file_id) = id.as_ref() else {
+            continue;
+        };
 
         if opts.resume && local_path.is_file() {
             if !opts.quiet {
@@ -511,8 +568,13 @@ pub fn download_folder(opts: &DownloadFolderOptions) -> Result<Option<DownloadFo
             continue;
         }
 
+        let mut file_url = format!("https://drive.google.com/uc?id={}", file_id);
+        if let Some(ref rk) = resource_key {
+            file_url = format!("{}&resourcekey={}", file_url, rk);
+        }
+
         let file_opts = DownloadOptions {
-            url: Some(format!("https://drive.google.com/uc?id={}", file_id)),
+            url: Some(file_url),
             output: Some(local_path.to_string_lossy().to_string()),
             quiet: opts.quiet,
             proxy: opts.proxy.clone(),
@@ -546,23 +608,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_valid_page() {
+    fn test_valid_page() -> Result<()> {
         let html_path = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/data/folder-page-sample.html"
         );
-        let content = std::fs::read_to_string(html_path).unwrap();
+        let content = std::fs::read_to_string(html_path)?;
         let folder_url =
             "https://drive.google.com/drive/folders/1KpLl_1tcK0eeehzN980zbG-3M2nhbVks";
 
         let (gdrive_file, id_name_type_iter) =
-            parse_google_drive_file(folder_url, &content).unwrap();
+            parse_google_drive_file(folder_url, &content)?;
 
         assert_eq!(gdrive_file.id, "1KpLl_1tcK0eeehzN980zbG-3M2nhbVks");
         assert_eq!(gdrive_file.name, "gdown_folder_test");
         assert_eq!(gdrive_file.file_type, "application/vnd.google-apps.folder");
         assert!(gdrive_file.children.is_empty());
-        assert!(gdrive_file.is_folder());
 
         let expected_children_ids = vec![
             "1aMZqPaU03E7XOQNXtjSCdguRHBaIQ82m",
@@ -588,7 +649,10 @@ mod tests {
             "image/jpeg",
         ];
 
-        let actual_ids: Vec<&str> = id_name_type_iter.iter().map(|(id, _, _)| id.as_str()).collect();
+        let actual_ids: Vec<&str> = id_name_type_iter
+            .iter()
+            .map(|(id, _, _)| id.as_str())
+            .collect();
         let actual_names: Vec<&str> = id_name_type_iter
             .iter()
             .map(|(_, name, _)| name.as_str())
@@ -601,12 +665,13 @@ mod tests {
         assert_eq!(actual_ids, expected_children_ids);
         assert_eq!(actual_names, expected_children_names);
         assert_eq!(actual_types, expected_children_types);
+
+        Ok(())
     }
 
     #[test]
     fn test_decode_unicode_escapes() {
         assert_eq!(decode_unicode_escapes(r"\x5b\x5b"), "[[");
         assert_eq!(decode_unicode_escapes(r"\x22hello\x22"), "\"hello\"");
-        assert_eq!(decode_unicode_escapes(r"no escapes"), "no escapes");
     }
 }

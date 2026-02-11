@@ -1,6 +1,5 @@
 use std::fs;
 
-use gdown::cached_download::{assert_filehash, compute_filehash};
 use gdown::download::get_url_from_gdrive_confirmation;
 use gdown::download_folder::{
     get_directory_structure, parse_google_drive_file, DownloadFolderOptions,
@@ -127,25 +126,33 @@ fn test_is_google_drive_url_negative() {
 // test_download (ports vendor/gdown/tests/test_download.py)
 // ---------------------------------------------------------------------------
 
+type TestResult = std::result::Result<(), Box<dyn std::error::Error>>;
+
 #[test]
-fn test_download_either_url_or_id_required() {
+fn test_download_either_url_or_id_required() -> TestResult {
     let opts = DownloadOptions {
         url: None,
         id: None,
         ..DownloadOptions::default()
     };
-    let result = download(&opts);
-    assert!(result.is_err());
-    match result.unwrap_err() {
+    let err = match download(&opts) {
+        Ok(_) => return Err("expected error".into()),
+        Err(e) => e,
+    };
+    match err {
         Error::InvalidInput(msg) => {
             assert!(msg.contains("Either url or id"));
         }
-        other => panic!("Expected InvalidInput, got {:?}", other),
+        other => {
+            return Err(format!("Expected InvalidInput, got {other:?}").into());
+        }
     }
+
+    Ok(())
 }
 
 #[test]
-fn test_download_both_url_and_id_is_error() {
+fn test_download_both_url_and_id_is_error() -> TestResult {
     let opts = DownloadOptions {
         url: Some("https://example.com".to_string()),
         id: Some("abc".to_string()),
@@ -153,6 +160,8 @@ fn test_download_both_url_and_id_is_error() {
     };
     let result = download(&opts);
     assert!(result.is_err());
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -160,61 +169,83 @@ fn test_download_both_url_and_id_is_error() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn test_gdrive_confirmation_uc_export_link() {
+fn test_gdrive_confirmation_uc_export_link() -> TestResult {
     let html = r#"<a href="/uc?export=download&amp;id=ABCDEF&amp;confirm=t">Download</a>"#;
-    let url = get_url_from_gdrive_confirmation(html).unwrap();
+    let url = get_url_from_gdrive_confirmation(html)?;
     assert!(url.starts_with("https://docs.google.com/uc?export=download"));
     assert!(url.contains("id=ABCDEF"));
     assert!(url.contains("confirm=t"));
     // &amp; should be decoded
     assert!(!url.contains("&amp;"));
+
+    Ok(())
 }
 
 #[test]
-fn test_gdrive_confirmation_download_url_json() {
+fn test_gdrive_confirmation_download_url_json() -> TestResult {
     let html = "something \"downloadUrl\":\"https://example.com/download\\u003did\\u0026token\" else";
-    let url = get_url_from_gdrive_confirmation(html).unwrap();
+    let url = get_url_from_gdrive_confirmation(html)?;
     assert_eq!(url, "https://example.com/download=id&token");
+
+    Ok(())
 }
 
 #[test]
-fn test_gdrive_confirmation_error_subcaption() {
+fn test_gdrive_confirmation_error_subcaption() -> TestResult {
     let html = r#"<p class="uc-error-subcaption">Sorry, quota exceeded</p>"#;
     let result = get_url_from_gdrive_confirmation(html);
     assert!(result.is_err());
-    match result.unwrap_err() {
+    let err = match result {
+        Ok(_) => return Err("expected error".into()),
+        Err(e) => e,
+    };
+    match err {
         Error::FileURLRetrieval(msg) => {
             assert!(msg.contains("Sorry, quota exceeded"));
         }
-        other => panic!("Expected FileURLRetrieval, got {:?}", other),
+        other => {
+            return Err(format!("Expected FileURLRetrieval, got {other:?}").into());
+        }
     }
+
+    Ok(())
 }
 
 #[test]
-fn test_gdrive_confirmation_empty_page() {
+fn test_gdrive_confirmation_empty_page() -> TestResult {
     let html = "<html><body>Nothing useful here</body></html>";
     let result = get_url_from_gdrive_confirmation(html);
     assert!(result.is_err());
-    match result.unwrap_err() {
+    let err = match result {
+        Ok(_) => return Err("expected error".into()),
+        Err(e) => e,
+    };
+    match err {
         Error::FileURLRetrieval(msg) => {
             assert!(msg.contains("Cannot retrieve the public link"));
         }
-        other => panic!("Expected FileURLRetrieval, got {:?}", other),
+        other => {
+            return Err(format!("Expected FileURLRetrieval, got {other:?}").into());
+        }
     }
+
+    Ok(())
 }
 
 #[test]
-fn test_gdrive_confirmation_download_form() {
+fn test_gdrive_confirmation_download_form() -> TestResult {
     let html = concat!(
         r#"<form id="download-form" action="https://drive.usercontent.google.com/download?id=FILEID&amp;export=download">"#,
         r#"<input type="hidden" name="confirm" value="t">"#,
         r#"<input type="hidden" name="uuid" value="abc-123">"#,
         r#"</form>"#
     );
-    let url = get_url_from_gdrive_confirmation(html).unwrap();
+    let url = get_url_from_gdrive_confirmation(html)?;
     assert!(url.contains("id=FILEID"));
     assert!(url.contains("confirm=t"));
     assert!(url.contains("uuid=abc-123"));
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -222,17 +253,16 @@ fn test_gdrive_confirmation_download_form() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn test_valid_page_parse() {
+fn test_valid_page_parse() -> TestResult {
     let html_path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/data/folder-page-sample.html"
     );
-    let content = fs::read_to_string(html_path).unwrap();
+    let content = fs::read_to_string(html_path)?;
     let folder_url =
         "https://drive.google.com/drive/folders/1KpLl_1tcK0eeehzN980zbG-3M2nhbVks";
 
-    let (gdrive_file, id_name_type_iter) =
-        parse_google_drive_file(folder_url, &content).unwrap();
+    let (gdrive_file, id_name_type_iter) = parse_google_drive_file(folder_url, &content)?;
 
     assert_eq!(gdrive_file.id, "1KpLl_1tcK0eeehzN980zbG-3M2nhbVks");
     assert_eq!(gdrive_file.name, "gdown_folder_test");
@@ -275,6 +305,8 @@ fn test_valid_page_parse() {
     assert_eq!(actual_ids, expected_ids);
     assert_eq!(actual_names, expected_names);
     assert_eq!(actual_types, expected_types);
+
+    Ok(())
 }
 
 #[test]
@@ -304,7 +336,7 @@ fn test_download_folder_both_url_and_id_is_error() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn test_get_directory_structure_flat() {
+fn test_get_directory_structure_flat() -> TestResult {
     let root = GoogleDriveFile {
         id: "root".to_string(),
         name: "root_folder".to_string(),
@@ -327,12 +359,16 @@ fn test_get_directory_structure_flat() {
 
     let structure = get_directory_structure(&root, "");
     assert_eq!(structure.len(), 2);
-    assert_eq!(structure[0], (Some("f1".to_string()), "file1.txt".to_string()));
-    assert_eq!(structure[1], (Some("f2".to_string()), "file2.jpg".to_string()));
+    let first = structure.first().ok_or("missing first entry")?;
+    let second = structure.get(1).ok_or("missing second entry")?;
+    assert_eq!(first, &(Some("f1".to_string()), "file1.txt".to_string()));
+    assert_eq!(second, &(Some("f2".to_string()), "file2.jpg".to_string()));
+
+    Ok(())
 }
 
 #[test]
-fn test_get_directory_structure_nested() {
+fn test_get_directory_structure_nested() -> TestResult {
     let root = GoogleDriveFile {
         id: "root".to_string(),
         name: "root_folder".to_string(),
@@ -360,114 +396,20 @@ fn test_get_directory_structure_nested() {
 
     let structure = get_directory_structure(&root, "");
     assert_eq!(structure.len(), 3);
-    assert_eq!(structure[0], (None, "sub".to_string()));
+    let first = structure.first().ok_or("missing first entry")?;
+    let second = structure.get(1).ok_or("missing second entry")?;
+    let third = structure.get(2).ok_or("missing third entry")?;
+    assert_eq!(first, &(None, "sub".to_string()));
     assert_eq!(
-        structure[1],
-        (Some("f1".to_string()), format!("sub{}nested.txt", std::path::MAIN_SEPARATOR))
+        second,
+        &(
+            Some("f1".to_string()),
+            format!("sub{}nested.txt", std::path::MAIN_SEPARATOR)
+        )
     );
-    assert_eq!(structure[2], (Some("f2".to_string()), "top.txt".to_string()));
-}
+    assert_eq!(third, &(Some("f2".to_string()), "top.txt".to_string()));
 
-// ---------------------------------------------------------------------------
-// test_cached_download (ports vendor/gdown/tests/test_cached_download.py)
-// ---------------------------------------------------------------------------
-
-#[test]
-fn test_compute_filehash_md5() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("test.txt");
-    fs::write(&path, b"hello world\n").unwrap();
-
-    let hash = compute_filehash(&path, "md5").unwrap();
-    assert!(hash.starts_with("md5:"));
-    assert_eq!(hash.len(), 4 + 32); // "md5:" + 32 hex chars
-}
-
-#[test]
-fn test_compute_filehash_sha1() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("test.txt");
-    fs::write(&path, b"hello world\n").unwrap();
-
-    let hash = compute_filehash(&path, "sha1").unwrap();
-    assert!(hash.starts_with("sha1:"));
-    assert_eq!(hash.len(), 5 + 40); // "sha1:" + 40 hex chars
-}
-
-#[test]
-fn test_compute_filehash_sha256() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("test.txt");
-    fs::write(&path, b"hello world\n").unwrap();
-
-    let hash = compute_filehash(&path, "sha256").unwrap();
-    assert!(hash.starts_with("sha256:"));
-    assert_eq!(hash.len(), 7 + 64); // "sha256:" + 64 hex chars
-}
-
-#[test]
-fn test_compute_filehash_sha512() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("test.txt");
-    fs::write(&path, b"hello world\n").unwrap();
-
-    let hash = compute_filehash(&path, "sha512").unwrap();
-    assert!(hash.starts_with("sha512:"));
-    assert_eq!(hash.len(), 7 + 128); // "sha512:" + 128 hex chars
-}
-
-#[test]
-fn test_compute_filehash_unsupported() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("test.txt");
-    fs::write(&path, b"test").unwrap();
-
-    let result = compute_filehash(&path, "blake2");
-    assert!(result.is_err());
-}
-
-#[test]
-fn test_assert_filehash_roundtrip() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("test.txt");
-    fs::write(&path, b"some content here").unwrap();
-
-    for algo in &["md5", "sha1", "sha256", "sha512"] {
-        let hash = compute_filehash(&path, algo).unwrap();
-        assert!(assert_filehash(&path, &hash, true).is_ok());
-    }
-}
-
-#[test]
-fn test_assert_filehash_mismatch() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("test.txt");
-    fs::write(&path, b"actual content").unwrap();
-
-    let result = assert_filehash(&path, "md5:00000000000000000000000000000000", true);
-    assert!(result.is_err());
-    match result.unwrap_err() {
-        Error::HashMismatch(msg) => {
-            assert!(msg.contains("doesn't match"));
-        }
-        other => panic!("Expected HashMismatch, got {:?}", other),
-    }
-}
-
-#[test]
-fn test_assert_filehash_invalid_format() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("test.txt");
-    fs::write(&path, b"test").unwrap();
-
-    let result = assert_filehash(&path, "nocolon", true);
-    assert!(result.is_err());
-    match result.unwrap_err() {
-        Error::InvalidInput(msg) => {
-            assert!(msg.contains("Invalid hash"));
-        }
-        other => panic!("Expected InvalidInput, got {:?}", other),
-    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -481,41 +423,41 @@ fn test_extractall_unsupported_format() {
 }
 
 #[test]
-fn test_extractall_zip() {
+fn test_extractall_zip() -> TestResult {
     use std::io::Write;
 
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir()?;
     let zip_path = dir.path().join("test.zip");
 
-    let file = fs::File::create(&zip_path).unwrap();
+    let file = fs::File::create(&zip_path)?;
     let mut zip_writer = zip::ZipWriter::new(file);
     let options =
         zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
-    zip_writer.start_file("hello.txt", options).unwrap();
-    zip_writer.write_all(b"Hello, world!").unwrap();
-    zip_writer.finish().unwrap();
+    zip_writer.start_file("hello.txt", options)?;
+    zip_writer.write_all(b"Hello, world!")?;
+    zip_writer.finish()?;
 
     let extract_dir = dir.path().join("extracted");
-    let files = gdown::extractall(
-        zip_path.to_str().unwrap(),
-        Some(extract_dir.to_str().unwrap()),
-    )
-    .unwrap();
+    let zip_path_str = zip_path.to_str().ok_or("zip path is not utf-8")?;
+    let extract_dir_str = extract_dir.to_str().ok_or("extract dir is not utf-8")?;
+    let files = gdown::extractall(zip_path_str, Some(extract_dir_str))?;
 
     assert_eq!(files.len(), 1);
     assert!(extract_dir.join("hello.txt").exists());
     assert_eq!(
-        fs::read_to_string(extract_dir.join("hello.txt")).unwrap(),
+        fs::read_to_string(extract_dir.join("hello.txt"))?,
         "Hello, world!"
     );
+
+    Ok(())
 }
 
 #[test]
-fn test_extractall_tar_gz() {
-    let dir = tempfile::tempdir().unwrap();
+fn test_extractall_tar_gz() -> TestResult {
+    let dir = tempfile::tempdir()?;
     let tar_gz_path = dir.path().join("test.tar.gz");
 
-    let file = fs::File::create(&tar_gz_path).unwrap();
+    let file = fs::File::create(&tar_gz_path)?;
     let enc = flate2::write::GzEncoder::new(file, flate2::Compression::default());
     let mut tar_builder = tar::Builder::new(enc);
 
@@ -524,46 +466,47 @@ fn test_extractall_tar_gz() {
     header.set_size(content.len() as u64);
     header.set_mode(0o644);
     header.set_cksum();
-    tar_builder
-        .append_data(&mut header, "greeting.txt", &content[..])
-        .unwrap();
-    let enc = tar_builder.into_inner().unwrap();
-    enc.finish().unwrap();
+    tar_builder.append_data(&mut header, "greeting.txt", content.as_slice())?;
+    let enc = tar_builder.into_inner()?;
+    enc.finish()?;
 
     let extract_dir = dir.path().join("extracted");
-    let files = gdown::extractall(
-        tar_gz_path.to_str().unwrap(),
-        Some(extract_dir.to_str().unwrap()),
-    )
-    .unwrap();
+    let tar_gz_path_str = tar_gz_path.to_str().ok_or("tar.gz path is not utf-8")?;
+    let extract_dir_str = extract_dir.to_str().ok_or("extract dir is not utf-8")?;
+    let files = gdown::extractall(tar_gz_path_str, Some(extract_dir_str))?;
 
     assert!(!files.is_empty());
     assert!(extract_dir.join("greeting.txt").exists());
     assert_eq!(
-        fs::read_to_string(extract_dir.join("greeting.txt")).unwrap(),
+        fs::read_to_string(extract_dir.join("greeting.txt"))?,
         "Hello from tar!"
     );
+
+    Ok(())
 }
 
 #[test]
-fn test_extractall_default_dest() {
+fn test_extractall_default_dest() -> TestResult {
     use std::io::Write;
 
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir()?;
     let zip_path = dir.path().join("test.zip");
 
-    let file = fs::File::create(&zip_path).unwrap();
+    let file = fs::File::create(&zip_path)?;
     let mut zip_writer = zip::ZipWriter::new(file);
     let options =
         zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
-    zip_writer.start_file("file.txt", options).unwrap();
-    zip_writer.write_all(b"content").unwrap();
-    zip_writer.finish().unwrap();
+    zip_writer.start_file("file.txt", options)?;
+    zip_writer.write_all(b"content")?;
+    zip_writer.finish()?;
 
     // Extract without specifying `to` — should go to parent of zip
-    let files = gdown::extractall(zip_path.to_str().unwrap(), None).unwrap();
+    let zip_path_str = zip_path.to_str().ok_or("zip path is not utf-8")?;
+    let files = gdown::extractall(zip_path_str, None)?;
     assert_eq!(files.len(), 1);
     assert!(dir.path().join("file.txt").exists());
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -580,24 +523,30 @@ fn test_max_number_files() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn test_cli_version_flag() {
+fn test_cli_version_flag() -> TestResult {
     #[allow(deprecated)]
-    let mut cmd = assert_cmd::Command::cargo_bin("gdown").unwrap();
+    let mut cmd = assert_cmd::Command::cargo_bin("gdown")?;
     cmd.arg("--version").assert().success();
+
+    Ok(())
 }
 
 #[test]
-fn test_cli_help_flag() {
+fn test_cli_help_flag() -> TestResult {
     #[allow(deprecated)]
-    let mut cmd = assert_cmd::Command::cargo_bin("gdown").unwrap();
+    let mut cmd = assert_cmd::Command::cargo_bin("gdown")?;
     cmd.arg("--help").assert().success();
+
+    Ok(())
 }
 
 #[test]
-fn test_cli_no_args_fails() {
+fn test_cli_no_args_fails() -> TestResult {
     #[allow(deprecated)]
-    let mut cmd = assert_cmd::Command::cargo_bin("gdown").unwrap();
+    let mut cmd = assert_cmd::Command::cargo_bin("gdown")?;
     cmd.assert().failure();
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

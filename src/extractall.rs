@@ -87,11 +87,9 @@ fn extract_tar(path: &Path, dest: &Path, compression: Compression) -> Result<Vec
             collect_tar_entries(&mut archive, dest, &mut files)?;
         }
         Compression::Bzip2 => {
-            // bzip2 support: use flate2 doesn't support bz2, we need a different crate
-            // For now, we'll return an error suggesting the user install bzip2 support
-            return Err(Error::ExtractError(
-                "bzip2 extraction is not yet supported in this build".to_string(),
-            ));
+            let decoder = bzip2::read::BzDecoder::new(file);
+            let mut archive = tar::Archive::new(decoder);
+            collect_tar_entries(&mut archive, dest, &mut files)?;
         }
     }
 
@@ -118,51 +116,55 @@ mod tests {
     use super::*;
     use std::io::Write;
 
+    type TestResult = std::result::Result<(), Box<dyn std::error::Error>>;
+
     #[test]
-    fn test_extractall_unsupported_format() {
+    fn test_extractall_unsupported_format() -> TestResult {
         let result = extractall("file.rar", None);
         assert!(result.is_err());
         if let Err(Error::ExtractError(msg)) = result {
             assert!(msg.contains("no appropriate extractor"));
         }
+
+        Ok(())
     }
 
     #[test]
-    fn test_extractall_zip() {
-        let dir = tempfile::tempdir().unwrap();
+    fn test_extractall_zip() -> TestResult {
+        let dir = tempfile::tempdir()?;
         let zip_path = dir.path().join("test.zip");
 
         // Create a simple zip file
-        let file = fs::File::create(&zip_path).unwrap();
+        let file = fs::File::create(&zip_path)?;
         let mut zip_writer = zip::ZipWriter::new(file);
         let options = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Stored);
-        zip_writer.start_file("hello.txt", options).unwrap();
-        zip_writer.write_all(b"Hello, world!").unwrap();
-        zip_writer.finish().unwrap();
+        zip_writer.start_file("hello.txt", options)?;
+        zip_writer.write_all(b"Hello, world!")?;
+        zip_writer.finish()?;
 
         let extract_dir = dir.path().join("extracted");
-        let files = extractall(
-            zip_path.to_str().unwrap(),
-            Some(extract_dir.to_str().unwrap()),
-        )
-        .unwrap();
+        let zip_path_str = zip_path.to_str().ok_or("zip path is not utf-8")?;
+        let extract_dir_str = extract_dir.to_str().ok_or("extract dir is not utf-8")?;
+        let files = extractall(zip_path_str, Some(extract_dir_str))?;
 
         assert_eq!(files.len(), 1);
         assert!(extract_dir.join("hello.txt").exists());
         assert_eq!(
-            fs::read_to_string(extract_dir.join("hello.txt")).unwrap(),
+            fs::read_to_string(extract_dir.join("hello.txt"))?,
             "Hello, world!"
         );
+
+        Ok(())
     }
 
     #[test]
-    fn test_extractall_tar_gz() {
-        let dir = tempfile::tempdir().unwrap();
+    fn test_extractall_tar_gz() -> TestResult {
+        let dir = tempfile::tempdir()?;
         let tar_gz_path = dir.path().join("test.tar.gz");
 
         // Create a tar.gz file
-        let file = fs::File::create(&tar_gz_path).unwrap();
+        let file = fs::File::create(&tar_gz_path)?;
         let enc = flate2::write::GzEncoder::new(file, flate2::Compression::default());
         let mut tar_builder = tar::Builder::new(enc);
 
@@ -171,24 +173,22 @@ mod tests {
         header.set_size(content.len() as u64);
         header.set_mode(0o644);
         header.set_cksum();
-        tar_builder
-            .append_data(&mut header, "greeting.txt", &content[..])
-            .unwrap();
-        let enc = tar_builder.into_inner().unwrap();
-        enc.finish().unwrap();
+        tar_builder.append_data(&mut header, "greeting.txt", content.as_slice())?;
+        let enc = tar_builder.into_inner()?;
+        enc.finish()?;
 
         let extract_dir = dir.path().join("extracted");
-        let files = extractall(
-            tar_gz_path.to_str().unwrap(),
-            Some(extract_dir.to_str().unwrap()),
-        )
-        .unwrap();
+        let tar_gz_path_str = tar_gz_path.to_str().ok_or("tar.gz path is not utf-8")?;
+        let extract_dir_str = extract_dir.to_str().ok_or("extract dir is not utf-8")?;
+        let files = extractall(tar_gz_path_str, Some(extract_dir_str))?;
 
         assert!(!files.is_empty());
         assert!(extract_dir.join("greeting.txt").exists());
         assert_eq!(
-            fs::read_to_string(extract_dir.join("greeting.txt")).unwrap(),
+            fs::read_to_string(extract_dir.join("greeting.txt"))?,
             "Hello from tar!"
         );
+
+        Ok(())
     }
 }

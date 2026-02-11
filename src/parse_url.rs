@@ -1,4 +1,3 @@
-use regex::Regex;
 use url::Url;
 
 /// Check if a URL is a Google Drive URL.
@@ -29,43 +28,70 @@ pub fn parse_url(url_str: &str, warning: bool) -> (Option<String>, bool) {
         return (None, is_download_link);
     }
 
-    let mut file_id: Option<String> = None;
-
-    // Check query parameter "id"
-    let query_pairs: Vec<(String, String)> = parsed
+    let mut id_iter = parsed
         .query_pairs()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect();
+        .filter(|(k, _)| k.as_ref() == "id")
+        .map(|(_, v)| v.into_owned());
 
-    let id_values: Vec<&str> = query_pairs
-        .iter()
-        .filter(|(k, _)| k == "id")
-        .map(|(_, v)| v.as_str())
-        .collect();
+    let first_id = id_iter.next();
+    let second_id = id_iter.next();
 
-    if id_values.len() == 1 {
-        file_id = Some(id_values[0].to_string());
-    } else if id_values.is_empty() {
-        let patterns = [
-            r"^/file/d/(.*?)/(edit|view)$",
-            r"^/file/u/[0-9]+/d/(.*?)/(edit|view)$",
-            r"^/document/d/(.*?)/(edit|htmlview|view)$",
-            r"^/document/u/[0-9]+/d/(.*?)/(edit|htmlview|view)$",
-            r"^/presentation/d/(.*?)/(edit|htmlview|view)$",
-            r"^/presentation/u/[0-9]+/d/(.*?)/(edit|htmlview|view)$",
-            r"^/spreadsheets/d/(.*?)/(edit|htmlview|view)$",
-            r"^/spreadsheets/u/[0-9]+/d/(.*?)/(edit|htmlview|view)$",
-        ];
+    let file_id = if second_id.is_some() {
+        None
+    } else if let Some(id) = first_id {
+        Some(id)
+    } else {
+        let segments: Vec<&str> = match parsed.path_segments() {
+            Some(s) => s.collect(),
+            None => Vec::new(),
+        };
 
-        let path = parsed.path();
-        for pattern in &patterns {
-            let re = Regex::new(pattern).unwrap();
-            if let Some(caps) = re.captures(path) {
-                file_id = Some(caps[1].to_string());
-                break;
-            }
+        fn is_action(action: &str, allowed: &[&str]) -> bool {
+            allowed.contains(&action)
         }
-    }
+
+        match segments.as_slice() {
+            ["file", "d", fid, action, ..] if is_action(action, &["edit", "view"]) => {
+                Some((*fid).to_string())
+            }
+            ["file", "u", _user, "d", fid, action, ..]
+                if is_action(action, &["edit", "view"]) =>
+            {
+                Some((*fid).to_string())
+            }
+            ["document", "d", fid, action, ..]
+                if is_action(action, &["edit", "htmlview", "view"]) =>
+            {
+                Some((*fid).to_string())
+            }
+            ["document", "u", _user, "d", fid, action, ..]
+                if is_action(action, &["edit", "htmlview", "view"]) =>
+            {
+                Some((*fid).to_string())
+            }
+            ["presentation", "d", fid, action, ..]
+                if is_action(action, &["edit", "htmlview", "view"]) =>
+            {
+                Some((*fid).to_string())
+            }
+            ["presentation", "u", _user, "d", fid, action, ..]
+                if is_action(action, &["edit", "htmlview", "view"]) =>
+            {
+                Some((*fid).to_string())
+            }
+            ["spreadsheets", "d", fid, action, ..]
+                if is_action(action, &["edit", "htmlview", "view"]) =>
+            {
+                Some((*fid).to_string())
+            }
+            ["spreadsheets", "u", _user, "d", fid, action, ..]
+                if is_action(action, &["edit", "htmlview", "view"]) =>
+            {
+                Some((*fid).to_string())
+            }
+            _ => None,
+        }
+    };
 
     if warning && !is_download_link {
         if let Some(ref fid) = file_id {

@@ -15,9 +15,6 @@ pub enum Error {
     ParseError(String),
 
     #[error("{0}")]
-    HashMismatch(String),
-
-    #[error("{0}")]
     ExtractError(String),
 
     #[error("HTTP error: {0}")]
