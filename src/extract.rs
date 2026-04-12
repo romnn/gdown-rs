@@ -1,4 +1,3 @@
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
@@ -23,7 +22,7 @@ pub fn extractall(path: &Path, to: Option<&Path>) -> Result<Vec<PathBuf>> {
     };
 
     if !dest.exists() {
-        fs::create_dir_all(&dest)?;
+        std::fs::create_dir_all(&dest)?;
     }
 
     if has_extension(path, "zip") {
@@ -64,7 +63,7 @@ fn has_double_extension(path: &Path, first: &str, second: &str) -> bool {
 }
 
 fn extract_zip(path: &Path, dest: &Path) -> Result<Vec<PathBuf>> {
-    let file = fs::File::open(path)?;
+    let file = std::fs::File::open(path)?;
     let mut archive = zip::ZipArchive::new(file)
         .map_err(|e| Error::Extract(format!("failed to open zip: {e}")))?;
 
@@ -76,12 +75,12 @@ fn extract_zip(path: &Path, dest: &Path) -> Result<Vec<PathBuf>> {
         let outpath = dest.join(entry.mangled_name());
 
         if entry.is_dir() {
-            fs::create_dir_all(&outpath)?;
+            std::fs::create_dir_all(&outpath)?;
         } else {
             if let Some(parent) = outpath.parent() {
-                fs::create_dir_all(parent)?;
+                std::fs::create_dir_all(parent)?;
             }
-            let mut outfile = fs::File::create(&outpath)?;
+            let mut outfile = std::fs::File::create(&outpath)?;
             std::io::copy(&mut entry, &mut outfile)?;
         }
         files.push(outpath);
@@ -91,7 +90,7 @@ fn extract_zip(path: &Path, dest: &Path) -> Result<Vec<PathBuf>> {
 }
 
 fn extract_tar(path: &Path, dest: &Path, compression: Compression) -> Result<Vec<PathBuf>> {
-    let file = fs::File::open(path)?;
+    let file = std::fs::File::open(path)?;
     let mut files = Vec::new();
 
     match compression {
@@ -132,9 +131,8 @@ fn collect_tar_entries<R: std::io::Read>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use color_eyre::eyre;
     use std::io::Write;
-
-    type TestResult = std::result::Result<(), Box<dyn std::error::Error>>;
 
     #[test]
     fn test_unsupported_format() {
@@ -146,11 +144,11 @@ mod tests {
     }
 
     #[test]
-    fn test_zip() -> TestResult {
+    fn test_zip() -> eyre::Result<()> {
         let dir = tempfile::tempdir()?;
         let zip_path = dir.path().join("test.zip");
 
-        let file = fs::File::create(&zip_path)?;
+        let file = std::fs::File::create(&zip_path)?;
         let mut zip_writer = zip::ZipWriter::new(file);
         let options = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Stored);
@@ -164,7 +162,7 @@ mod tests {
         assert_eq!(files.len(), 1);
         assert!(extract_dir.join("hello.txt").exists());
         assert_eq!(
-            fs::read_to_string(extract_dir.join("hello.txt"))?,
+            std::fs::read_to_string(extract_dir.join("hello.txt"))?,
             "Hello, world!"
         );
 
@@ -172,11 +170,11 @@ mod tests {
     }
 
     #[test]
-    fn test_tar_gz() -> TestResult {
+    fn test_tar_gz() -> eyre::Result<()> {
         let dir = tempfile::tempdir()?;
         let tar_gz_path = dir.path().join("test.tar.gz");
 
-        let file = fs::File::create(&tar_gz_path)?;
+        let file = std::fs::File::create(&tar_gz_path)?;
         let enc = flate2::write::GzEncoder::new(file, flate2::Compression::default());
         let mut tar_builder = tar::Builder::new(enc);
 
@@ -195,7 +193,7 @@ mod tests {
         assert!(!files.is_empty());
         assert!(extract_dir.join("greeting.txt").exists());
         assert_eq!(
-            fs::read_to_string(extract_dir.join("greeting.txt"))?,
+            std::fs::read_to_string(extract_dir.join("greeting.txt"))?,
             "Hello from tar!"
         );
 
@@ -203,11 +201,11 @@ mod tests {
     }
 
     #[test]
-    fn test_default_dest() -> TestResult {
+    fn test_default_dest() -> eyre::Result<()> {
         let dir = tempfile::tempdir()?;
         let zip_path = dir.path().join("test.zip");
 
-        let file = fs::File::create(&zip_path)?;
+        let file = std::fs::File::create(&zip_path)?;
         let mut zip_writer = zip::ZipWriter::new(file);
         let options = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Stored);

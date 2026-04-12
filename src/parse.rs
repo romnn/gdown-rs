@@ -1,41 +1,31 @@
-use std::sync::LazyLock;
-
 use regex::Regex;
 use reqwest::Response;
 use reqwest::header::{HeaderMap, SET_COOKIE};
 use scraper::{Html, Selector};
+use std::sync::LazyLock;
 use url::Url;
 
 use crate::client::sanitize_filename;
 use crate::error::{Error, Result};
 
 macro_rules! lazy_regex {
-    ($pattern:expr) => {{
-        #[allow(
-            clippy::expect_used,
-            reason = "regex pattern is a compile-time literal"
-        )]
-        static RE: LazyLock<Regex> =
-            LazyLock::new(|| Regex::new($pattern).expect("valid regex literal"));
-        &RE
-    }};
+    ($pattern:expr) => {
+        LazyLock::new(|| {
+            #[allow(
+                clippy::expect_used,
+                reason = "regex pattern is a compile-time literal"
+            )]
+            Regex::new($pattern).expect("valid regex literal")
+        })
+    };
 }
 
-fn uc_export_re() -> &'static Regex {
-    lazy_regex!(r#"href="(/uc\?export=download[^"]+)""#)
-}
-fn download_url_re() -> &'static Regex {
-    lazy_regex!(r#""downloadUrl":"([^"]+)""#)
-}
-fn error_subcaption_re() -> &'static Regex {
-    lazy_regex!(r#"<p class="uc-error-subcaption">(.*)</p>"#)
-}
-fn title_re() -> &'static Regex {
-    lazy_regex!(r"<title>(.+)</title>")
-}
-fn drive_string_re() -> &'static Regex {
-    lazy_regex!(r"'((?:[^'\\]|\\.)*)'")
-}
+static UC_EXPORT_RE: LazyLock<Regex> = lazy_regex!(r#"href="(/uc\?export=download[^"]+)""#);
+static DOWNLOAD_URL_RE: LazyLock<Regex> = lazy_regex!(r#""downloadUrl":"([^"]+)""#);
+static ERROR_SUBCAPTION_RE: LazyLock<Regex> =
+    lazy_regex!(r#"<p class="uc-error-subcaption">(.*)</p>"#);
+static TITLE_RE: LazyLock<Regex> = lazy_regex!(r"<title>(.+)</title>");
+static DRIVE_STRING_RE: LazyLock<Regex> = lazy_regex!(r"'((?:[^'\\]|\\.)*)'");
 
 fn is_action(action: &str, allowed: &[&str]) -> bool {
     allowed.contains(&action)
@@ -164,7 +154,7 @@ pub fn url_from_gdrive_confirmation(contents: &str) -> Result<String> {
     let input_selector = Selector::parse(r#"input[type="hidden"]"#)
         .map_err(|e| Error::Parse(format!("failed to parse selector: {e}")))?;
 
-    if let Some(caps) = uc_export_re().captures(contents)
+    if let Some(caps) = UC_EXPORT_RE.captures(contents)
         && let Some(m) = caps.get(1)
     {
         let url = format!("https://docs.google.com{}", m.as_str());
@@ -210,14 +200,14 @@ pub fn url_from_gdrive_confirmation(contents: &str) -> Result<String> {
         return Ok(parsed.to_string());
     }
 
-    if let Some(caps) = download_url_re().captures(contents)
+    if let Some(caps) = DOWNLOAD_URL_RE.captures(contents)
         && let Some(m) = caps.get(1)
     {
         let url = m.as_str().replace("\\u003d", "=").replace("\\u0026", "&");
         return Ok(url);
     }
 
-    if let Some(caps) = error_subcaption_re().captures(contents)
+    if let Some(caps) = ERROR_SUBCAPTION_RE.captures(contents)
         && let Some(m) = caps.get(1)
     {
         return Err(Error::FileUrlRetrieval(m.as_str().to_string()));
@@ -315,7 +305,7 @@ pub fn confirm_token_from_html(html: &str) -> Option<String> {
 
 #[must_use]
 pub fn title_from_html(html: &str) -> Option<String> {
-    title_re()
+    TITLE_RE
         .captures(html)
         .and_then(|caps| caps.get(1))
         .map(|m| m.as_str().to_string())
@@ -425,7 +415,7 @@ fn extract_drive_ivd(document: &Html) -> Result<String> {
             continue;
         }
 
-        let strings: Vec<String> = drive_string_re()
+        let strings: Vec<String> = DRIVE_STRING_RE
             .captures_iter(&inner_html)
             .filter_map(|c| c.get(1).map(|m| m.as_str().to_string()))
             .collect();

@@ -1,7 +1,6 @@
-use std::path::{Path, PathBuf};
-
 use reqwest::header::{HeaderMap, HeaderValue, RANGE};
 use reqwest::{Client, Response};
+use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
 use url::Url;
 

@@ -1,4 +1,4 @@
-use std::fs;
+use color_eyre::eyre;
 use std::path::Path;
 
 use gdown::download_folder::DownloadFolderOptions;
@@ -8,8 +8,6 @@ use gdown::parse::{
     url_from_gdrive_confirmation,
 };
 use gdown::{DownloadOptions, download, is_google_drive_url, parse_url};
-
-type TestResult = std::result::Result<(), Box<dyn std::error::Error>>;
 
 #[test]
 fn test_parse_url_open_link() {
@@ -124,7 +122,7 @@ async fn test_download_both_url_and_id_is_error() {
 }
 
 #[test]
-fn test_gdrive_confirmation_uc_export_link() -> TestResult {
+fn test_gdrive_confirmation_uc_export_link() -> eyre::Result<()> {
     let html = r#"<a href="/uc?export=download&amp;id=ABCDEF&amp;confirm=t">Download</a>"#;
     let url = url_from_gdrive_confirmation(html)?;
     assert!(url.starts_with("https://docs.google.com/uc?export=download"));
@@ -134,7 +132,7 @@ fn test_gdrive_confirmation_uc_export_link() -> TestResult {
 }
 
 #[test]
-fn test_gdrive_confirmation_download_url_json() -> TestResult {
+fn test_gdrive_confirmation_download_url_json() -> eyre::Result<()> {
     let html =
         "something \"downloadUrl\":\"https://example.com/download\\u003did\\u0026token\" else";
     let url = url_from_gdrive_confirmation(html)?;
@@ -163,7 +161,7 @@ fn test_gdrive_confirmation_empty_page() {
 }
 
 #[test]
-fn test_gdrive_confirmation_download_form() -> TestResult {
+fn test_gdrive_confirmation_download_form() -> eyre::Result<()> {
     let html = concat!(
         r#"<form id="download-form" action="https://drive.usercontent.google.com/download?id=FILEID&amp;export=download">"#,
         r#"<input type="hidden" name="confirm" value="t">"#,
@@ -196,12 +194,12 @@ async fn test_download_folder_both_url_and_id_is_error() {
 }
 
 #[test]
-fn test_parse_folder_page() -> TestResult {
+fn test_parse_folder_page() -> eyre::Result<()> {
     let html_path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/data/folder-page-sample.html"
     );
-    let content = fs::read_to_string(html_path)?;
+    let content = std::fs::read_to_string(html_path)?;
     let folder_url = "https://drive.google.com/drive/folders/1KpLl_1tcK0eeehzN980zbG-3M2nhbVks";
 
     let parsed = parse_folder_page(folder_url, &content)?;
@@ -232,13 +230,13 @@ fn test_extractall_unsupported_format() {
 }
 
 #[test]
-fn test_extractall_zip() -> TestResult {
+fn test_extractall_zip() -> eyre::Result<()> {
     use std::io::Write;
 
     let dir = tempfile::tempdir()?;
     let zip_path = dir.path().join("test.zip");
 
-    let file = fs::File::create(&zip_path)?;
+    let file = std::fs::File::create(&zip_path)?;
     let mut zip_writer = zip::ZipWriter::new(file);
     let options =
         zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
@@ -252,7 +250,7 @@ fn test_extractall_zip() -> TestResult {
     assert_eq!(files.len(), 1);
     assert!(extract_dir.join("hello.txt").exists());
     assert_eq!(
-        fs::read_to_string(extract_dir.join("hello.txt"))?,
+        std::fs::read_to_string(extract_dir.join("hello.txt"))?,
         "Hello, world!"
     );
 
@@ -260,11 +258,11 @@ fn test_extractall_zip() -> TestResult {
 }
 
 #[test]
-fn test_extractall_tar_gz() -> TestResult {
+fn test_extractall_tar_gz() -> eyre::Result<()> {
     let dir = tempfile::tempdir()?;
     let tar_gz_path = dir.path().join("test.tar.gz");
 
-    let file = fs::File::create(&tar_gz_path)?;
+    let file = std::fs::File::create(&tar_gz_path)?;
     let enc = flate2::write::GzEncoder::new(file, flate2::Compression::default());
     let mut tar_builder = tar::Builder::new(enc);
 
@@ -283,7 +281,7 @@ fn test_extractall_tar_gz() -> TestResult {
     assert!(!files.is_empty());
     assert!(extract_dir.join("greeting.txt").exists());
     assert_eq!(
-        fs::read_to_string(extract_dir.join("greeting.txt"))?,
+        std::fs::read_to_string(extract_dir.join("greeting.txt"))?,
         "Hello from tar!"
     );
 
@@ -291,13 +289,13 @@ fn test_extractall_tar_gz() -> TestResult {
 }
 
 #[test]
-fn test_extractall_default_dest() -> TestResult {
+fn test_extractall_default_dest() -> eyre::Result<()> {
     use std::io::Write;
 
     let dir = tempfile::tempdir()?;
     let zip_path = dir.path().join("test.zip");
 
-    let file = fs::File::create(&zip_path)?;
+    let file = std::fs::File::create(&zip_path)?;
     let mut zip_writer = zip::ZipWriter::new(file);
     let options =
         zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
@@ -338,7 +336,7 @@ fn test_confirm_token_from_headers_empty() {
 }
 
 #[test]
-fn test_confirm_token_from_headers_with_warning() -> TestResult {
+fn test_confirm_token_from_headers_with_warning() -> eyre::Result<()> {
     let mut headers = reqwest::header::HeaderMap::new();
     headers.append(
         reqwest::header::SET_COOKIE,
@@ -350,7 +348,7 @@ fn test_confirm_token_from_headers_with_warning() -> TestResult {
 }
 
 #[test]
-fn test_confirm_token_from_headers_ignores_other_cookies() -> TestResult {
+fn test_confirm_token_from_headers_ignores_other_cookies() -> eyre::Result<()> {
     let mut headers = reqwest::header::HeaderMap::new();
     headers.append(
         reqwest::header::SET_COOKIE,
