@@ -121,7 +121,7 @@ struct Cli {
         user_agent = ?cli.user_agent
     )
 )]
-fn run(cli: Cli) -> i32 {
+async fn run(cli: Cli) -> i32 {
     // Determine if input is URL or ID
     let (url, id) = if cli.url_or_id.starts_with("http://") || cli.url_or_id.starts_with("https://")
     {
@@ -147,7 +147,7 @@ fn run(cli: Cli) -> i32 {
             skip_download: false,
             resume: cli.resume,
         };
-        gdown::download_folder(&opts).map(|_| ())
+        gdown::download_folder(&opts).await.map(|_| ())
     } else {
         let opts = DownloadOptions {
             url,
@@ -163,7 +163,7 @@ fn run(cli: Cli) -> i32 {
             format: cli.format,
             user_agent: cli.user_agent,
         };
-        download(&opts).map(|_| ())
+        download(&opts).await.map(|_| ())
     };
 
     if let Err(e) = result {
@@ -190,7 +190,8 @@ fn run(cli: Cli) -> i32 {
     0
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let cli = Cli::parse();
 
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
@@ -202,5 +203,5 @@ fn main() {
     });
     tracing_subscriber::fmt().with_env_filter(env_filter).init();
 
-    process::exit(run(cli));
+    process::exit(run(cli).await);
 }

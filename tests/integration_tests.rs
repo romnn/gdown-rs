@@ -115,14 +115,14 @@ fn test_is_google_drive_url_negative() {
 
 type TestResult = std::result::Result<(), Box<dyn std::error::Error>>;
 
-#[test]
-fn test_download_either_url_or_id_required() -> TestResult {
+#[tokio::test]
+async fn test_download_either_url_or_id_required() -> TestResult {
     let opts = DownloadOptions {
         url: None,
         id: None,
         ..DownloadOptions::default()
     };
-    let Err(err) = download(&opts) else {
+    let Err(err) = download(&opts).await else {
         return Err("expected error".into());
     };
     match err {
@@ -137,14 +137,14 @@ fn test_download_either_url_or_id_required() -> TestResult {
     Ok(())
 }
 
-#[test]
-fn test_download_both_url_and_id_is_error() {
+#[tokio::test]
+async fn test_download_both_url_and_id_is_error() {
     let opts = DownloadOptions {
         url: Some("https://example.com".to_string()),
         id: Some("abc".to_string()),
         ..DownloadOptions::default()
     };
-    let result = download(&opts);
+    let result = download(&opts).await;
     assert!(result.is_err());
 }
 
@@ -294,25 +294,25 @@ fn test_valid_page_parse() -> TestResult {
     Ok(())
 }
 
-#[test]
-fn test_download_folder_either_url_or_id_required() {
+#[tokio::test]
+async fn test_download_folder_either_url_or_id_required() {
     let opts = DownloadFolderOptions {
         url: None,
         id: None,
         ..DownloadFolderOptions::default()
     };
-    let result = gdown::download_folder(&opts);
+    let result = gdown::download_folder(&opts).await;
     assert!(result.is_err());
 }
 
-#[test]
-fn test_download_folder_both_url_and_id_is_error() {
+#[tokio::test]
+async fn test_download_folder_both_url_and_id_is_error() {
     let opts = DownloadFolderOptions {
         url: Some("https://drive.google.com/drive/folders/abc".to_string()),
         id: Some("abc".to_string()),
         ..DownloadFolderOptions::default()
     };
-    let result = gdown::download_folder(&opts);
+    let result = gdown::download_folder(&opts).await;
     assert!(result.is_err());
 }
 

@@ -1,14 +1,12 @@
-use std::fs;
-use std::io::Read;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use indicatif::{ProgressBar, ProgressStyle};
 use regex::Regex;
-use reqwest::blocking::{Client, ClientBuilder, Response};
 use reqwest::header::{HeaderMap, HeaderValue, RANGE, SET_COOKIE};
+use reqwest::{Client, ClientBuilder, Response};
 use scraper::{Html, Selector};
+use tokio::io::AsyncWriteExt;
 use url::Url;
 
 use crate::error::{Error, Result};
@@ -210,10 +208,11 @@ fn get_confirm_token_from_html(html: &str) -> Option<String> {
     tokens.pop()
 }
 
-fn read_response_text_limited(res: Response) -> Result<String> {
-    let mut bytes = Vec::<u8>::new();
-    res.take(MAX_HTML_BYTES as u64).read_to_end(&mut bytes)?;
-    Ok(String::from_utf8_lossy(&bytes).to_string())
+async fn read_response_text_limited(res: Response) -> Result<String> {
+    let bytes = res.bytes().await?;
+    let limit = bytes.len().min(MAX_HTML_BYTES);
+    let truncated = bytes.get(..limit).unwrap_or(&bytes);
+    Ok(String::from_utf8_lossy(truncated).to_string())
 }
 
 /// Build an HTTP client (session equivalent).
@@ -314,7 +313,7 @@ impl Default for DownloadOptions {
         user_agent = ?opts.user_agent
     )
 )]
-pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
+pub async fn download(opts: &DownloadOptions) -> Result<Option<String>> {
     let has_url = opts.url.is_some();
     let has_id = opts.id.is_some();
     if !(has_id ^ has_url) {
@@ -381,7 +380,7 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
     let mut res;
 
     loop {
-        res = client.get(&current_url).send()?;
+        res = client.get(&current_url).send().await?;
 
         if !(gdrive_file_id.is_some() && is_gdrive_download_link) {
             break;
@@ -407,7 +406,7 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
 
         if content_type.starts_with("text/html") {
             let headers = res.headers().clone();
-            let text = read_response_text_limited(res)?;
+            let text = read_response_text_limited(res).await?;
             if let Some(caps) = title_re.captures(&text) {
                 let title = caps.get(1).map_or("", |m| m.as_str());
                 if let Some(ref fid) = gdrive_file_id {
@@ -520,7 +519,7 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
     if output_is_path && output.ends_with(std::path::MAIN_SEPARATOR) {
         let output_dir = Path::new(&output);
         if !output_dir.exists() {
-            fs::create_dir_all(output_dir)?;
+            tokio::fs::create_dir_all(output_dir).await?;
         }
         output = output_dir
             .join(&filename_from_url)
@@ -572,19 +571,11 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
 
         let t_start = Instant::now();
         let mut downloaded: u64 = 0;
-        let mut buf = vec![0u8; CHUNK_SIZE];
-        let mut out = std::io::stdout().lock();
+        let mut out = tokio::io::stdout();
 
-        loop {
-            let bytes_read = std::io::Read::read(&mut res, &mut buf)?;
-            if bytes_read == 0 {
-                break;
-            }
-            let chunk = buf
-                .get(..bytes_read)
-                .ok_or_else(|| Error::ParseError("Unexpected read size".to_string()))?;
-            out.write_all(chunk)?;
-            downloaded += bytes_read as u64;
+        while let Some(chunk) = res.chunk().await? {
+            out.write_all(&chunk).await?;
+            downloaded += chunk.len() as u64;
             if let Some(ref pb) = pbar {
                 pb.set_position(downloaded);
             }
@@ -596,10 +587,12 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
                 )]
                 let expected = downloaded as f64 / speed_limit;
                 if elapsed < expected {
-                    std::thread::sleep(Duration::from_secs_f64(expected - elapsed));
+                    tokio::time::sleep(Duration::from_secs_f64(expected - elapsed)).await;
                 }
             }
         }
+
+        out.flush().await?;
 
         if let Some(pb) = pbar {
             pb.finish();
@@ -626,7 +619,7 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
 
         let mut existing_tmp_files: Vec<PathBuf> = Vec::new();
         if dir.is_dir()
-            && let Ok(entries) = fs::read_dir(&dir)
+            && let Ok(entries) = std::fs::read_dir(&dir)
         {
             for entry in entries.flatten() {
                 let fname = entry.file_name().to_string_lossy().to_string();
@@ -662,12 +655,13 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
         }
 
         // Open tmp file for appending
-        let mut f = fs::OpenOptions::new()
+        let mut f = tokio::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(&tmp_file)?;
+            .open(&tmp_file)
+            .await?;
 
-        let mut start_size = f.metadata()?.len();
+        let mut start_size = f.metadata().await?.len();
         if start_size > 0 && resume {
             // Re-request with Range header
             let mut headers = HeaderMap::new();
@@ -676,17 +670,19 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
                 .parse()
                 .map_err(|e| Error::ParseError(format!("Invalid header value: {e}")))?;
             headers.insert(RANGE, header_value);
-            res = client.get(&current_url).headers(headers).send()?;
+            res = client.get(&current_url).headers(headers).send().await?;
 
             // If server ignores Range and returns full content, restart cleanly.
             if res.status().as_u16() == 200 {
                 resume = false;
+                f.flush().await?;
                 drop(f);
-                let _ = fs::remove_file(&tmp_file);
-                f = fs::OpenOptions::new()
+                let _ = tokio::fs::remove_file(&tmp_file).await;
+                f = tokio::fs::OpenOptions::new()
                     .create(true)
                     .append(true)
-                    .open(&tmp_file)?;
+                    .open(&tmp_file)
+                    .await?;
                 start_size = 0;
             }
         }
@@ -733,18 +729,10 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
 
         let t_start = Instant::now();
         let mut downloaded: u64 = 0;
-        let mut buf = vec![0u8; CHUNK_SIZE];
 
-        loop {
-            let bytes_read = std::io::Read::read(&mut res, &mut buf)?;
-            if bytes_read == 0 {
-                break;
-            }
-            let chunk = buf
-                .get(..bytes_read)
-                .ok_or_else(|| Error::ParseError("Unexpected read size".to_string()))?;
-            f.write_all(chunk)?;
-            downloaded += bytes_read as u64;
+        while let Some(chunk) = res.chunk().await? {
+            f.write_all(&chunk).await?;
+            downloaded += chunk.len() as u64;
             if let Some(ref pb) = pbar {
                 pb.set_position(start_size + downloaded);
             }
@@ -756,7 +744,7 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
                 )]
                 let expected = downloaded as f64 / speed_limit;
                 if elapsed < expected {
-                    std::thread::sleep(Duration::from_secs_f64(expected - elapsed));
+                    tokio::time::sleep(Duration::from_secs_f64(expected - elapsed)).await;
                 }
             }
         }
@@ -766,8 +754,9 @@ pub fn download(opts: &DownloadOptions) -> Result<Option<String>> {
         }
 
         // Move tmp file to final output
+        f.flush().await?;
         drop(f);
-        fs::rename(&tmp_file, &output)?;
+        tokio::fs::rename(&tmp_file, &output).await?;
     }
 
     Ok(Some(output))

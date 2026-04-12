@@ -6,8 +6,8 @@ pub mod parse_url;
 
 pub use download::{DownloadOptions, download};
 pub use download_folder::{
-    DownloadFolderOptions, DownloadFolderResult, GoogleDriveFileToDownload, MAX_NUMBER_FILES,
-    download_folder,
+    DirEntry, DownloadFolderOptions, DownloadFolderResult, DriveFolder, FlatEntry,
+    GoogleDriveFileToDownload, MAX_NUMBER_FILES, download_folder,
 };
 pub use error::{Error, Result};
 pub use extractall::extractall;
