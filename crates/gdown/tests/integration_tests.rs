@@ -357,21 +357,3 @@ fn test_confirm_token_from_headers_ignores_other_cookies() -> eyre::Result<()> {
     assert!(confirm_token_from_headers(&headers).is_none());
     Ok(())
 }
-
-#[test]
-fn test_cli_version_flag() {
-    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("gdown");
-    cmd.arg("--version").assert().success();
-}
-
-#[test]
-fn test_cli_help_flag() {
-    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("gdown");
-    cmd.arg("--help").assert().success();
-}
-
-#[test]
-fn test_cli_no_args_fails() {
-    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("gdown");
-    cmd.assert().failure();
-}

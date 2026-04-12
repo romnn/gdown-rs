@@ -1,23 +1,16 @@
-[package]
-name = "gdown"
-version = "0.1.0"
+[workspace]
+resolver = "3"
+members = ["crates/gdown", "crates/gdown-cli"]
+
+[workspace.package]
 edition = "2024"
-description = "Download files and folders from Google Drive shared links"
 license = "MIT"
 
-[lib]
-name = "gdown"
-path = "src/lib.rs"
-
-[[bin]]
-name = "gdown"
-path = "src/main.rs"
-
-[lints.rust]
+[workspace.lints.rust]
 unsafe_code = "deny"
 unused_must_use = "deny"
 
-[lints.clippy]
+[workspace.lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
@@ -25,29 +18,3 @@ unreachable = "deny"
 unimplemented = "deny"
 todo = "deny"
 indexing_slicing = "deny"
-
-[dependencies]
-bzip2 = "0.6"
-clap = { version = "4", features = ["derive"] }
-flate2 = "1"
-indicatif = "0.18"
-regex = "1"
-reqwest = { version = "0.13", features = ["cookies"] }
-scraper = "0.26"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tar = "0.4"
-tempfile = "3"
-thiserror = "2"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "io-std", "time"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-url = "2"
-urlencoding = "2"
-zip = "8"
-
-[dev-dependencies]
-assert_cmd = "2"
-color-eyre = "0.6"
-predicates = "3"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

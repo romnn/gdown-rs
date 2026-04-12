@@ -1,0 +1,23 @@
+[package]
+name = "gdown-cli"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "CLI for downloading files and folders from Google Drive"
+
+[[bin]]
+name = "gdown"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+gdown = { path = "../gdown" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+assert_cmd = "2"
