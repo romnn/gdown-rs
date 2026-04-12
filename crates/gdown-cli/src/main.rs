@@ -1,8 +1,10 @@
 use std::process;
+use std::sync::Arc;
 
 use clap::Parser;
 use gdown::download_folder::DownloadFolderOptions;
 use gdown::error::Error;
+use gdown::progress::IndicatifProgress;
 use gdown::types::CommonOptions;
 use gdown::{DownloadOptions, download};
 use tracing_subscriber::EnvFilter;
@@ -103,10 +105,20 @@ struct Cli {
     /// User-Agent to use for downloading file
     #[arg(long)]
     user_agent: Option<String>,
+
+    /// Don't show progress bar
+    #[arg(long)]
+    no_progress: bool,
 }
 
 impl Cli {
     fn common_options(&self) -> CommonOptions {
+        let progress = if self.quiet || self.no_progress {
+            None
+        } else {
+            Some(Arc::new(IndicatifProgress::new()) as Arc<dyn gdown::Progress>)
+        };
+
         CommonOptions {
             output: self.output.clone(),
             quiet: self.quiet,
@@ -116,6 +128,7 @@ impl Cli {
             verify: !self.no_check_certificate,
             user_agent: self.user_agent.clone(),
             resume: self.resume,
+            progress,
         }
     }
 }

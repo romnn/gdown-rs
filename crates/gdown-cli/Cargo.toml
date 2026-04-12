@@ -14,7 +14,7 @@ workspace = true
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-gdown = { path = "../gdown" }
+gdown = { path = "../gdown", features = ["indicatif"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

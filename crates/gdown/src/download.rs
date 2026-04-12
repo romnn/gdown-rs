@@ -1,12 +1,13 @@
+use std::path::{Path, PathBuf};
+
 use reqwest::header::{HeaderMap, HeaderValue, RANGE};
 use reqwest::{Client, Response};
-use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
 use url::Url;
 
 use crate::client::{
-    build_client, content_length, default_file_user_agent, make_progress_bar,
-    read_response_limited, sanitize_filename, stream_response,
+    build_client, content_length, default_file_user_agent, read_response_limited,
+    sanitize_filename, stream_response,
 };
 use crate::error::{Error, Result};
 use crate::parse::{
@@ -351,20 +352,17 @@ async fn download_to_file(
     }
 
     let total = content_length(&res).map(|v| v + start_size);
-    let pbar = make_progress_bar(total, start_size, opts.common.quiet);
+    let progress = opts.common.progress.as_deref();
 
     stream_response(
         &mut res,
         &mut f,
-        pbar.as_ref(),
+        progress,
+        total,
         opts.common.speed,
         start_size,
     )
     .await?;
-
-    if let Some(pb) = pbar {
-        pb.finish();
-    }
 
     drop(f);
     tokio::fs::rename(&tmp_file, output).await?;
@@ -394,14 +392,10 @@ async fn download_to_stdout(
     }
 
     let total = content_length(&res);
-    let pbar = make_progress_bar(total, 0, opts.common.quiet);
+    let progress = opts.common.progress.as_deref();
     let mut out = tokio::io::stdout();
 
-    stream_response(&mut res, &mut out, pbar.as_ref(), opts.common.speed, 0).await?;
-
-    if let Some(pb) = pbar {
-        pb.finish();
-    }
+    stream_response(&mut res, &mut out, progress, total, opts.common.speed, 0).await?;
 
     out.flush().await?;
     Ok(None)

@@ -434,6 +434,7 @@ pub async fn download_folder(opts: &DownloadFolderOptions) -> Result<Vec<String>
                 verify: opts.common.verify,
                 resume: opts.common.resume,
                 user_agent: opts.common.user_agent.clone(),
+                progress: opts.common.progress.clone(),
             },
             ..DownloadOptions::default()
         };

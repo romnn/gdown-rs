@@ -1,10 +1,10 @@
 use std::time::{Duration, Instant};
 
-use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::{Client, ClientBuilder, Response};
 use tokio::io::AsyncWriteExt;
 
 use crate::error::{Error, Result};
+use crate::types::Progress;
 
 const DEFAULT_FILE_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) \
     AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36";
@@ -49,25 +49,6 @@ pub fn build_client(
 }
 
 #[must_use]
-pub fn make_progress_bar(total: Option<u64>, start: u64, quiet: bool) -> Option<ProgressBar> {
-    if quiet {
-        return None;
-    }
-    let pb = match total {
-        Some(t) => ProgressBar::new(t),
-        None => ProgressBar::new_spinner(),
-    };
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec})")
-            .unwrap_or_else(|_| ProgressStyle::default_bar())
-            .progress_chars("#>-"),
-    );
-    pb.set_position(start);
-    Some(pb)
-}
-
-#[must_use]
 pub fn content_length(res: &Response) -> Option<u64> {
     res.headers()
         .get("Content-Length")
@@ -85,7 +66,8 @@ pub fn content_length(res: &Response) -> Option<u64> {
 pub async fn stream_response(
     res: &mut Response,
     writer: &mut (impl AsyncWriteExt + Unpin),
-    pbar: Option<&ProgressBar>,
+    progress: Option<&dyn Progress>,
+    total: Option<u64>,
     speed_limit: Option<f64>,
     start_offset: u64,
 ) -> Result<u64> {
@@ -95,8 +77,8 @@ pub async fn stream_response(
     while let Some(chunk) = res.chunk().await? {
         writer.write_all(&chunk).await?;
         downloaded += chunk.len() as u64;
-        if let Some(pb) = pbar {
-            pb.set_position(start_offset + downloaded);
+        if let Some(cb) = progress {
+            cb.on_progress(start_offset + downloaded, total);
         }
         if let Some(limit) = speed_limit {
             let elapsed = t_start.elapsed().as_secs_f64();
@@ -112,6 +94,11 @@ pub async fn stream_response(
     }
 
     writer.flush().await?;
+
+    if let Some(cb) = progress {
+        cb.on_finish();
+    }
+
     Ok(downloaded)
 }
 

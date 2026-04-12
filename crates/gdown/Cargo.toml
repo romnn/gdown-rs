@@ -5,13 +5,16 @@ edition.workspace = true
 license.workspace = true
 description = "Download files and folders from Google Drive shared links"
 
+[features]
+indicatif = ["dep:indicatif"]
+
 [lints]
 workspace = true
 
 [dependencies]
 bzip2 = "0.6"
 flate2 = "1"
-indicatif = "0.18"
+indicatif = { version = "0.18", optional = true }
 regex = "1"
 reqwest = { version = "0.13", features = ["cookies"] }
 scraper = "0.26"
