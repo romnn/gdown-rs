@@ -3,10 +3,10 @@ use std::process;
 use clap::Parser;
 use gdown::download_folder::DownloadFolderOptions;
 use gdown::error::Error;
+use gdown::types::CommonOptions;
 use gdown::{DownloadOptions, download};
 use tracing_subscriber::EnvFilter;
 
-/// Parse a file size string like "10MB" into bytes.
 fn parse_file_size(s: &str) -> Result<f64, String> {
     let s = s.trim();
     let (num_str, unit) = if let Some(prefix) = s.strip_suffix("GB") {
@@ -18,22 +18,24 @@ fn parse_file_size(s: &str) -> Result<f64, String> {
     } else if let Some(prefix) = s.strip_suffix('B') {
         (prefix, "B")
     } else {
-        return Err(format!("Invalid size format: '{s}'. Use e.g. 10MB, 256KB"));
+        return Err(format!("invalid size format: '{s}'. Use e.g. 10MB, 1.5GB"));
     };
 
-    if num_str.is_empty() || !num_str.chars().all(|c| c.is_ascii_digit()) {
-        return Err(format!("Invalid number: {num_str}"));
+    let size: f64 = num_str
+        .trim()
+        .parse()
+        .map_err(|_| format!("invalid number: '{num_str}'"))?;
+
+    if size < 0.0 {
+        return Err(format!("size must be non-negative, got {size}"));
     }
 
-    let size: f64 = num_str
-        .parse()
-        .map_err(|_| format!("Invalid number: {num_str}"))?;
     let bytes = match unit {
         "B" => size,
         "KB" => size * 1024.0,
         "MB" => size * 1024.0 * 1024.0,
         "GB" => size * 1024.0 * 1024.0 * 1024.0,
-        _ => return Err(format!("Invalid size unit: '{unit}'. Use e.g. 10MB, 256KB")),
+        _ => return Err(format!("invalid size unit: '{unit}'")),
     };
 
     Ok(bytes)
@@ -47,7 +49,7 @@ fn parse_file_size(s: &str) -> Result<f64, String> {
 )]
 #[allow(
     clippy::struct_excessive_bools,
-    reason = "CLI flag structs naturally contain many booleans; refactoring into enums/state machines would hurt ergonomics"
+    reason = "CLI flag structs naturally contain many booleans"
 )]
 struct Cli {
     /// URL or file/folder ID to download from
@@ -89,9 +91,9 @@ struct Cli {
     #[arg(long)]
     folder: bool,
 
-    /// (folder only) Asserts that it is ok to download max files per folder
+    /// (folder only) Allow downloading folders with more than 50 files
     #[arg(long)]
-    remaining_ok: bool,
+    ignore_file_limit: bool,
 
     /// Format of Google Docs, Spreadsheets and Slides.
     /// Default is Google Docs: 'docx', Spreadsheet: 'xlsx', Slides: 'pptx'.
@@ -103,26 +105,28 @@ struct Cli {
     user_agent: Option<String>,
 }
 
+impl Cli {
+    fn common_options(&self) -> CommonOptions {
+        CommonOptions {
+            output: self.output.clone(),
+            quiet: self.quiet,
+            proxy: self.proxy.clone(),
+            speed: self.speed,
+            use_cookies: !self.no_cookies,
+            verify: !self.no_check_certificate,
+            user_agent: self.user_agent.clone(),
+            resume: self.resume,
+        }
+    }
+}
+
 #[tracing::instrument(
     name = "gdown",
     level = "info",
     skip(cli),
-    fields(
-        folder = cli.folder,
-        quiet = cli.quiet,
-        fuzzy = cli.fuzzy,
-        resume = cli.resume,
-        output = ?cli.output,
-        proxy = ?cli.proxy,
-        no_cookies = cli.no_cookies,
-        no_check_certificate = cli.no_check_certificate,
-        remaining_ok = cli.remaining_ok,
-        format = ?cli.format,
-        user_agent = ?cli.user_agent
-    )
+    fields(folder = cli.folder, quiet = cli.quiet, fuzzy = cli.fuzzy, resume = cli.resume)
 )]
 async fn run(cli: Cli) -> i32 {
-    // Determine if input is URL or ID
     let (url, id) = if cli.url_or_id.starts_with("http://") || cli.url_or_id.starts_with("https://")
     {
         (Some(cli.url_or_id.clone()), None)
@@ -136,55 +140,34 @@ async fn run(cli: Cli) -> i32 {
         let opts = DownloadFolderOptions {
             url,
             id,
-            output: cli.output,
-            quiet: cli.quiet,
-            proxy: cli.proxy,
-            speed: cli.speed,
-            use_cookies: !cli.no_cookies,
-            remaining_ok: cli.remaining_ok,
-            verify: !cli.no_check_certificate,
-            user_agent: cli.user_agent,
-            skip_download: false,
-            resume: cli.resume,
+            common: cli.common_options(),
+            ignore_file_limit: cli.ignore_file_limit,
         };
         gdown::download_folder(&opts).await.map(|_| ())
     } else {
         let opts = DownloadOptions {
             url,
-            output: cli.output,
-            quiet: cli.quiet,
-            proxy: cli.proxy,
-            speed: cli.speed,
-            use_cookies: !cli.no_cookies,
-            verify: !cli.no_check_certificate,
             id,
+            common: cli.common_options(),
             fuzzy: cli.fuzzy,
-            resume: cli.resume,
             format: cli.format,
-            user_agent: cli.user_agent,
         };
         download(&opts).await.map(|_| ())
     };
 
     if let Err(e) = result {
         match e {
-            Error::FileURLRetrieval(ref msg) => {
+            Error::FileUrlRetrieval(ref msg) => {
                 tracing::error!(message = %msg, "file url retrieval failed");
-                return 1;
             }
-            Error::FolderContentsMaximumLimit(ref msg) => {
-                tracing::error!(
-                    message = %msg,
-                    hint = "You can use `--remaining-ok` option to ignore this error.",
-                    "failed to retrieve folder contents"
-                );
-                return 1;
+            Error::FolderLimit(ref msg) => {
+                tracing::error!(message = %msg, "folder file limit exceeded");
             }
             _ => {
                 tracing::error!(error = %e, "unhandled error");
-                return 1;
             }
         }
+        return 1;
     }
 
     0

@@ -11,13 +11,12 @@ use crate::error::{Error, Result};
 ///
 /// # Errors
 ///
-/// Returns an error if the archive format is unsupported, the input file cannot be read,
-/// extraction fails, or the destination directory cannot be created/written.
-pub fn extractall(path: &str, to: Option<&str>) -> Result<Vec<String>> {
-    let archive_path = Path::new(path);
+/// Returns an error if the format is unsupported, the archive cannot be read,
+/// or extraction to disk fails.
+pub fn extractall(path: &Path, to: Option<&Path>) -> Result<Vec<PathBuf>> {
     let dest = match to {
-        Some(d) => PathBuf::from(d),
-        None => archive_path
+        Some(d) => d.to_path_buf(),
+        None => path
             .parent()
             .unwrap_or_else(|| Path::new("."))
             .to_path_buf(),
@@ -27,19 +26,18 @@ pub fn extractall(path: &str, to: Option<&str>) -> Result<Vec<String>> {
         fs::create_dir_all(&dest)?;
     }
 
-    if has_extension(archive_path, "zip") {
-        extract_zip(archive_path, &dest)
-    } else if has_extension(archive_path, "tar") {
-        extract_tar(archive_path, &dest, Compression::None)
-    } else if has_extension(archive_path, "tgz") || has_double_extension(archive_path, "tar", "gz")
-    {
-        extract_tar(archive_path, &dest, Compression::Gzip)
-    } else if has_extension(archive_path, "tbz") || has_double_extension(archive_path, "tar", "bz2")
-    {
-        extract_tar(archive_path, &dest, Compression::Bzip2)
+    if has_extension(path, "zip") {
+        extract_zip(path, &dest)
+    } else if has_extension(path, "tar") {
+        extract_tar(path, &dest, Compression::None)
+    } else if has_extension(path, "tgz") || has_double_extension(path, "tar", "gz") {
+        extract_tar(path, &dest, Compression::Gzip)
+    } else if has_extension(path, "tbz") || has_double_extension(path, "tar", "bz2") {
+        extract_tar(path, &dest, Compression::Bzip2)
     } else {
-        Err(Error::ExtractError(format!(
-            "Could not extract '{path}' as no appropriate extractor is found"
+        Err(Error::Extract(format!(
+            "could not extract '{}': no appropriate extractor found",
+            path.display()
         )))
     }
 }
@@ -60,22 +58,21 @@ fn has_double_extension(path: &Path, first: &str, second: &str) -> bool {
     if !has_extension(path, second) {
         return false;
     }
-
     path.file_stem()
         .and_then(|stem| Path::new(stem).extension())
         .is_some_and(|actual| actual.eq_ignore_ascii_case(first))
 }
 
-fn extract_zip(path: &Path, dest: &Path) -> Result<Vec<String>> {
+fn extract_zip(path: &Path, dest: &Path) -> Result<Vec<PathBuf>> {
     let file = fs::File::open(path)?;
     let mut archive = zip::ZipArchive::new(file)
-        .map_err(|e| Error::ExtractError(format!("Failed to open zip: {e}")))?;
+        .map_err(|e| Error::Extract(format!("failed to open zip: {e}")))?;
 
     let mut files = Vec::new();
     for i in 0..archive.len() {
         let mut entry = archive
             .by_index(i)
-            .map_err(|e| Error::ExtractError(format!("Failed to read zip entry: {e}")))?;
+            .map_err(|e| Error::Extract(format!("failed to read zip entry: {e}")))?;
         let outpath = dest.join(entry.mangled_name());
 
         if entry.is_dir() {
@@ -87,15 +84,14 @@ fn extract_zip(path: &Path, dest: &Path) -> Result<Vec<String>> {
             let mut outfile = fs::File::create(&outpath)?;
             std::io::copy(&mut entry, &mut outfile)?;
         }
-        files.push(outpath.to_string_lossy().to_string());
+        files.push(outpath);
     }
 
     Ok(files)
 }
 
-fn extract_tar(path: &Path, dest: &Path, compression: Compression) -> Result<Vec<String>> {
+fn extract_tar(path: &Path, dest: &Path, compression: Compression) -> Result<Vec<PathBuf>> {
     let file = fs::File::open(path)?;
-
     let mut files = Vec::new();
 
     match compression {
@@ -121,13 +117,13 @@ fn extract_tar(path: &Path, dest: &Path, compression: Compression) -> Result<Vec
 fn collect_tar_entries<R: std::io::Read>(
     archive: &mut tar::Archive<R>,
     dest: &Path,
-    files: &mut Vec<String>,
+    files: &mut Vec<PathBuf>,
 ) -> Result<()> {
     for entry in archive.entries()? {
         let mut entry = entry?;
         let entry_path = entry.path()?.to_path_buf();
         let outpath = dest.join(&entry_path);
-        files.push(outpath.to_string_lossy().to_string());
+        files.push(outpath);
         entry.unpack_in(dest)?;
     }
     Ok(())
@@ -141,20 +137,19 @@ mod tests {
     type TestResult = std::result::Result<(), Box<dyn std::error::Error>>;
 
     #[test]
-    fn test_extractall_unsupported_format() {
-        let result = extractall("file.rar", None);
+    fn test_unsupported_format() {
+        let result = extractall(Path::new("file.rar"), None);
         assert!(result.is_err());
-        if let Err(Error::ExtractError(msg)) = result {
+        if let Err(Error::Extract(msg)) = result {
             assert!(msg.contains("no appropriate extractor"));
         }
     }
 
     #[test]
-    fn test_extractall_zip() -> TestResult {
+    fn test_zip() -> TestResult {
         let dir = tempfile::tempdir()?;
         let zip_path = dir.path().join("test.zip");
 
-        // Create a simple zip file
         let file = fs::File::create(&zip_path)?;
         let mut zip_writer = zip::ZipWriter::new(file);
         let options = zip::write::SimpleFileOptions::default()
@@ -164,9 +159,7 @@ mod tests {
         zip_writer.finish()?;
 
         let extract_dir = dir.path().join("extracted");
-        let zip_path_str = zip_path.to_str().ok_or("zip path is not utf-8")?;
-        let extract_dir_str = extract_dir.to_str().ok_or("extract dir is not utf-8")?;
-        let files = extractall(zip_path_str, Some(extract_dir_str))?;
+        let files = extractall(&zip_path, Some(&extract_dir))?;
 
         assert_eq!(files.len(), 1);
         assert!(extract_dir.join("hello.txt").exists());
@@ -179,11 +172,10 @@ mod tests {
     }
 
     #[test]
-    fn test_extractall_tar_gz() -> TestResult {
+    fn test_tar_gz() -> TestResult {
         let dir = tempfile::tempdir()?;
         let tar_gz_path = dir.path().join("test.tar.gz");
 
-        // Create a tar.gz file
         let file = fs::File::create(&tar_gz_path)?;
         let enc = flate2::write::GzEncoder::new(file, flate2::Compression::default());
         let mut tar_builder = tar::Builder::new(enc);
@@ -198,9 +190,7 @@ mod tests {
         enc.finish()?;
 
         let extract_dir = dir.path().join("extracted");
-        let tar_gz_path_str = tar_gz_path.to_str().ok_or("tar.gz path is not utf-8")?;
-        let extract_dir_str = extract_dir.to_str().ok_or("extract dir is not utf-8")?;
-        let files = extractall(tar_gz_path_str, Some(extract_dir_str))?;
+        let files = extractall(&tar_gz_path, Some(&extract_dir))?;
 
         assert!(!files.is_empty());
         assert!(extract_dir.join("greeting.txt").exists());
@@ -208,6 +198,26 @@ mod tests {
             fs::read_to_string(extract_dir.join("greeting.txt"))?,
             "Hello from tar!"
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_default_dest() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let zip_path = dir.path().join("test.zip");
+
+        let file = fs::File::create(&zip_path)?;
+        let mut zip_writer = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        zip_writer.start_file("file.txt", options)?;
+        zip_writer.write_all(b"content")?;
+        zip_writer.finish()?;
+
+        let files = extractall(&zip_path, None)?;
+        assert_eq!(files.len(), 1);
+        assert!(dir.path().join("file.txt").exists());
 
         Ok(())
     }

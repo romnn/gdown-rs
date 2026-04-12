@@ -689,7 +689,6 @@ dependencies = [
  "assert_cmd",
  "bzip2",
  "clap",
- "filetime",
  "flate2",
  "indicatif",
  "predicates",

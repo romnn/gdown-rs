@@ -3,19 +3,19 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("{0}")]
-    FileURLRetrieval(String),
+    FileUrlRetrieval(String),
 
     #[error("{0}")]
-    FolderContentsMaximumLimit(String),
+    FolderLimit(String),
 
     #[error("{0}")]
     InvalidInput(String),
 
     #[error("{0}")]
-    ParseError(String),
+    Parse(String),
 
     #[error("{0}")]
-    ExtractError(String),
+    Extract(String),
 
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
