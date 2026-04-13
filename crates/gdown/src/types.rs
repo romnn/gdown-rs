@@ -24,7 +24,7 @@ pub trait Progress: Send + Sync {
     clippy::struct_excessive_bools,
     reason = "mirrors CLI flags; these are independent on/off switches, not a state machine"
 )]
-pub struct CommonOptions {
+pub struct Options {
     pub output: Option<String>,
     pub quiet: bool,
     pub proxy: Option<String>,
@@ -36,9 +36,9 @@ pub struct CommonOptions {
     pub progress: Option<Arc<dyn Progress>>,
 }
 
-impl std::fmt::Debug for CommonOptions {
+impl std::fmt::Debug for Options {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CommonOptions")
+        f.debug_struct("Options")
             .field("output", &self.output)
             .field("quiet", &self.quiet)
             .field("proxy", &self.proxy)
@@ -52,7 +52,7 @@ impl std::fmt::Debug for CommonOptions {
     }
 }
 
-impl Default for CommonOptions {
+impl Default for Options {
     fn default() -> Self {
         Self {
             output: None,

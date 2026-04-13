@@ -5,7 +5,7 @@ use clap::Parser;
 use gdown::download_folder::DownloadFolderOptions;
 use gdown::error::Error;
 use gdown::progress::IndicatifProgress;
-use gdown::types::CommonOptions;
+use gdown::types::Options;
 use gdown::{DownloadOptions, download};
 use tracing_subscriber::EnvFilter;
 
@@ -112,14 +112,14 @@ struct Cli {
 }
 
 impl Cli {
-    fn common_options(&self) -> CommonOptions {
+    fn options(&self) -> Options {
         let progress = if self.quiet || self.no_progress {
             None
         } else {
             Some(Arc::new(IndicatifProgress::new()) as Arc<dyn gdown::Progress>)
         };
 
-        CommonOptions {
+        Options {
             output: self.output.clone(),
             quiet: self.quiet,
             proxy: self.proxy.clone(),
@@ -153,7 +153,7 @@ async fn run(cli: Cli) -> i32 {
         let opts = DownloadFolderOptions {
             url,
             id,
-            common: cli.common_options(),
+            options: cli.options(),
             ignore_file_limit: cli.ignore_file_limit,
         };
         gdown::download_folder(&opts).await.map(|_| ())
@@ -161,7 +161,7 @@ async fn run(cli: Cli) -> i32 {
         let opts = DownloadOptions {
             url,
             id,
-            common: cli.common_options(),
+            options: cli.options(),
             fuzzy: cli.fuzzy,
             format: cli.format,
         };

@@ -7,7 +7,7 @@ use crate::client::{build_client, default_folder_user_agent};
 use crate::download::{DownloadOptions, download};
 use crate::error::{Error, Result};
 use crate::parse::{FolderChild, extract_resource_key, is_google_drive_url, parse_folder_page};
-use crate::types::{CommonOptions, resolve_url_or_id};
+use crate::types::{Options, resolve_url_or_id};
 
 const FOLDER_MIME: &str = "application/vnd.google-apps.folder";
 const MAX_FILES: usize = 50;
@@ -54,6 +54,8 @@ pub struct DriveFolder {
     resource_key: Option<String>,
     client: reqwest::Client,
     cache: tokio::sync::Mutex<HashMap<String, Vec<DirEntry>>>,
+    /// Options applied to every file download (progress, quiet, etc.).
+    options: Options,
 }
 
 impl DriveFolder {
@@ -98,7 +100,15 @@ impl DriveFolder {
             resource_key,
             client,
             cache: tokio::sync::Mutex::new(HashMap::new()),
+            options: Options::default(),
         })
+    }
+
+    /// Set options (progress callback, quiet, etc.) for all downloads.
+    #[must_use]
+    pub fn with_options(mut self, options: Options) -> Self {
+        self.options = options;
+        self
     }
 
     /// List direct children of a folder by ID (cached after first fetch).
@@ -230,9 +240,9 @@ impl DriveFolder {
 
         download(&DownloadOptions {
             id: Some(id.to_string()),
-            common: CommonOptions {
+            options: Options {
                 output: Some(output.to_string_lossy().to_string()),
-                ..CommonOptions::default()
+                ..self.options.clone()
             },
             ..DownloadOptions::default()
         })
@@ -321,7 +331,7 @@ impl DriveFolder {
 pub struct DownloadFolderOptions {
     pub url: Option<String>,
     pub id: Option<String>,
-    pub common: CommonOptions,
+    pub options: Options,
     pub ignore_file_limit: bool,
 }
 
@@ -340,10 +350,10 @@ pub struct DownloadFolderOptions {
     fields(
         url = ?opts.url,
         id = ?opts.id,
-        output = ?opts.common.output,
-        quiet = opts.common.quiet,
+        output = ?opts.options.output,
+        quiet = opts.options.quiet,
         ignore_file_limit = opts.ignore_file_limit,
-        resume = opts.common.resume
+        resume = opts.options.resume
     )
 )]
 pub async fn download_folder(opts: &DownloadFolderOptions) -> Result<Vec<String>> {
@@ -352,27 +362,27 @@ pub async fn download_folder(opts: &DownloadFolderOptions) -> Result<Vec<String>
     })?;
 
     let user_agent = opts
-        .common
+        .options
         .user_agent
         .as_deref()
         .unwrap_or(default_folder_user_agent());
 
     let client = build_client(
-        opts.common.proxy.as_deref(),
-        opts.common.use_cookies,
+        opts.options.proxy.as_deref(),
+        opts.options.use_cookies,
         user_agent,
-        opts.common.verify,
+        opts.options.verify,
     )?;
 
-    let folder = DriveFolder::open_with_client(&url, client)?;
+    let folder = DriveFolder::open_with_client(&url, client)?.with_options(opts.options.clone());
 
-    if !opts.common.quiet {
+    if !opts.options.quiet {
         tracing::info!("retrieving folder contents");
     }
 
     let entries = folder.list_recursive().await?;
 
-    if !opts.common.quiet {
+    if !opts.options.quiet {
         tracing::info!(file_count = entries.len(), "folder contents retrieved");
     }
 
@@ -387,7 +397,7 @@ pub async fn download_folder(opts: &DownloadFolderOptions) -> Result<Vec<String>
     }
 
     let output = opts
-        .common
+        .options
         .output
         .clone()
         .unwrap_or_else(|| format!(".{}", std::path::MAIN_SEPARATOR));
@@ -412,7 +422,7 @@ pub async fn download_folder(opts: &DownloadFolderOptions) -> Result<Vec<String>
             continue;
         }
 
-        if opts.common.resume && local_path.is_file() {
+        if opts.options.resume && local_path.is_file() {
             tracing::debug!(path = %local_path.display(), "skipping already downloaded file");
             files.push(local_path.to_string_lossy().to_string());
             continue;
@@ -425,16 +435,16 @@ pub async fn download_folder(opts: &DownloadFolderOptions) -> Result<Vec<String>
 
         let file_opts = DownloadOptions {
             url: Some(file_url),
-            common: CommonOptions {
+            options: Options {
                 output: Some(local_path.to_string_lossy().to_string()),
-                quiet: opts.common.quiet,
-                proxy: opts.common.proxy.clone(),
-                speed: opts.common.speed,
-                use_cookies: opts.common.use_cookies,
-                verify: opts.common.verify,
-                resume: opts.common.resume,
-                user_agent: opts.common.user_agent.clone(),
-                progress: opts.common.progress.clone(),
+                quiet: opts.options.quiet,
+                proxy: opts.options.proxy.clone(),
+                speed: opts.options.speed,
+                use_cookies: opts.options.use_cookies,
+                verify: opts.options.verify,
+                resume: opts.options.resume,
+                user_agent: opts.options.user_agent.clone(),
+                progress: opts.options.progress.clone(),
             },
             ..DownloadOptions::default()
         };
@@ -450,7 +460,7 @@ pub async fn download_folder(opts: &DownloadFolderOptions) -> Result<Vec<String>
         }
     }
 
-    if !opts.common.quiet {
+    if !opts.options.quiet {
         tracing::info!(files_downloaded = files.len(), "download completed");
     }
 

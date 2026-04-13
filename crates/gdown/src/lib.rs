@@ -15,4 +15,4 @@ pub use download_folder::{
 pub use error::{Error, Result};
 pub use extract::extractall;
 pub use parse::{ParsedUrl, is_google_drive_url, parse_url};
-pub use types::{CommonOptions, Progress};
+pub use types::{Options, Progress};

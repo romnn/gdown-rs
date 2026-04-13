@@ -14,14 +14,14 @@ use crate::parse::{
     confirm_token_from_headers, confirm_token_from_html, extract_resource_key,
     filename_from_response, parse_url, title_from_html, url_from_gdrive_confirmation,
 };
-use crate::types::{CommonOptions, resolve_url_or_id};
+use crate::types::{Options, resolve_url_or_id};
 
 /// Options for downloading a single file.
 #[derive(Debug, Clone, Default)]
 pub struct DownloadOptions {
     pub url: Option<String>,
     pub id: Option<String>,
-    pub common: CommonOptions,
+    pub options: Options,
     pub fuzzy: bool,
     pub format: Option<String>,
 }
@@ -42,9 +42,9 @@ pub struct DownloadOptions {
     fields(
         url = ?opts.url,
         id = ?opts.id,
-        output = ?opts.common.output,
+        output = ?opts.options.output,
         fuzzy = opts.fuzzy,
-        resume = opts.common.resume,
+        resume = opts.options.resume,
     )
 )]
 pub async fn download(opts: &DownloadOptions) -> Result<Option<String>> {
@@ -53,7 +53,7 @@ pub async fn download(opts: &DownloadOptions) -> Result<Option<String>> {
     })?;
 
     let user_agent = opts
-        .common
+        .options
         .user_agent
         .as_deref()
         .unwrap_or(default_file_user_agent());
@@ -62,10 +62,10 @@ pub async fn download(opts: &DownloadOptions) -> Result<Option<String>> {
     let resource_key = extract_resource_key(&url_origin);
 
     let client = build_client(
-        opts.common.proxy.as_deref(),
-        opts.common.use_cookies,
+        opts.options.proxy.as_deref(),
+        opts.options.use_cookies,
         user_agent,
-        opts.common.verify,
+        opts.options.verify,
     )?;
 
     let parsed = parse_url(&url);
@@ -126,7 +126,7 @@ pub async fn download(opts: &DownloadOptions) -> Result<Option<String>> {
     .unwrap_or_else(|| "download".to_string());
 
     let mut output = opts
-        .common
+        .options
         .output
         .clone()
         .unwrap_or_else(|| filename_from_url.clone());
@@ -271,7 +271,7 @@ async fn download_to_file(
     output: &str,
     opts: &DownloadOptions,
 ) -> Result<Option<String>> {
-    let mut resume = opts.common.resume;
+    let mut resume = opts.options.resume;
     let output_path = Path::new(output);
 
     if resume && output_path.is_file() {
@@ -347,19 +347,19 @@ async fn download_to_file(
         }
     }
 
-    if !opts.common.quiet {
+    if !opts.options.quiet {
         log_download_info(url_origin, current_url, output, resume, &tmp_file);
     }
 
     let total = content_length(&res).map(|v| v + start_size);
-    let progress = opts.common.progress.as_deref();
+    let progress = opts.options.progress.as_deref();
 
     stream_response(
         &mut res,
         &mut f,
         progress,
         total,
-        opts.common.speed,
+        opts.options.speed,
         start_size,
     )
     .await?;
@@ -376,13 +376,13 @@ async fn download_to_stdout(
     url_origin: &str,
     current_url: &str,
 ) -> Result<Option<String>> {
-    if opts.common.resume {
+    if opts.options.resume {
         return Err(Error::InvalidInput(
             "cannot use --continue when output is stdout".to_string(),
         ));
     }
 
-    if !opts.common.quiet {
+    if !opts.options.quiet {
         tracing::info!("downloading to stdout");
         if url_origin == current_url {
             tracing::info!(from = %current_url, "source");
@@ -392,10 +392,10 @@ async fn download_to_stdout(
     }
 
     let total = content_length(&res);
-    let progress = opts.common.progress.as_deref();
+    let progress = opts.options.progress.as_deref();
     let mut out = tokio::io::stdout();
 
-    stream_response(&mut res, &mut out, progress, total, opts.common.speed, 0).await?;
+    stream_response(&mut res, &mut out, progress, total, opts.options.speed, 0).await?;
 
     out.flush().await?;
     Ok(None)
