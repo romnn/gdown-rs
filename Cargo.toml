@@ -18,3 +18,6 @@ unreachable = "deny"
 unimplemented = "deny"
 todo = "deny"
 indexing_slicing = "deny"
+
+[workspace.metadata.cargo-fc.subcommands.udeps]
+maximal_features = true
