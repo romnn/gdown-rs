@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use url::Url;
 
-use crate::client::{build_client, default_folder_user_agent};
+use crate::client::{build_client, default_folder_user_agent, sanitize_filename};
 use crate::download::{DownloadOptions, download};
 use crate::error::{Error, Result};
 use crate::parse::{FolderChild, extract_resource_key, is_google_drive_url, parse_folder_page};
@@ -299,7 +299,9 @@ impl DriveFolder {
         while let Some((folder_id, local_dir)) = pending.pop() {
             tokio::fs::create_dir_all(&local_dir).await?;
             for child in self.list(&folder_id).await? {
-                let local_path = local_dir.join(&child.name);
+                // Child names come from the remote listing; a name containing separators
+                // or traversal must not place the download outside the destination.
+                let local_path = local_dir.join(sanitize_filename(&child.name));
                 if child.is_folder() {
                     pending.push((child.id, local_path));
                 } else {
@@ -457,7 +459,7 @@ pub async fn download_folder(opts: &DownloadFolderOptions) -> Result<Vec<String>
 
     let mut files: Vec<String> = Vec::new();
     for entry in &entries {
-        let local_path = root_dir.join(&entry.path);
+        let local_path = sanitized_local_path(&root_dir, &entry.path);
 
         if entry.is_folder {
             tokio::fs::create_dir_all(&local_path).await?;
@@ -507,4 +509,38 @@ pub async fn download_folder(opts: &DownloadFolderOptions) -> Result<Vec<String>
     }
 
     Ok(files)
+}
+
+/// Joins a slash-separated remote path onto `root`, sanitizing every component.
+///
+/// The components are remote file and folder names; a name containing separators or
+/// traversal must not place the download outside the destination.
+fn sanitized_local_path(root: &Path, remote_path: &str) -> PathBuf {
+    remote_path
+        .split('/')
+        .fold(root.to_path_buf(), |dir, component| {
+            dir.join(sanitize_filename(component))
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitized_local_path;
+    use std::path::Path;
+
+    #[test]
+    fn sanitized_local_path_keeps_clean_names() {
+        assert_eq!(
+            sanitized_local_path(Path::new("/dest"), "models/weights.onnx"),
+            Path::new("/dest/models/weights.onnx")
+        );
+    }
+
+    #[test]
+    fn sanitized_local_path_contains_traversal() {
+        assert_eq!(
+            sanitized_local_path(Path::new("/dest"), "../outside/..\\evil"),
+            Path::new("/dest/_/outside/.._evil")
+        );
+    }
 }
