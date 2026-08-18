@@ -251,7 +251,14 @@ impl DriveFolder {
         Ok(())
     }
 
-    /// Download all files directly under a remote directory.
+    /// Download a remote directory tree into `dest_dir`, mirroring its layout.
+    ///
+    /// Subfolders are descended into, so a caller receives the same structure it would
+    /// see in Drive. This matters for formats that *are* directories — an Apple
+    /// `.mlpackage` keeps its weights two levels down — where copying only the top-level
+    /// files would produce an empty directory rather than a usable artifact.
+    ///
+    /// Returns the downloaded file paths. Empty remote folders are still created locally.
     ///
     /// # Errors
     ///
@@ -262,18 +269,22 @@ impl DriveFolder {
             return Err(Error::InvalidInput(format!("{prefix} is not a directory")));
         }
 
-        tokio::fs::create_dir_all(dest_dir).await?;
-
-        let children = self.list(&dir_entry.id).await?;
+        // An explicit stack rather than recursion: an `async fn` that awaits itself needs
+        // boxing on every level, and the traversal order does not matter here.
         let mut paths = Vec::new();
+        let mut pending = vec![(dir_entry.id, dest_dir.to_path_buf())];
 
-        for child in &children {
-            if child.is_folder() {
-                continue;
+        while let Some((folder_id, local_dir)) = pending.pop() {
+            tokio::fs::create_dir_all(&local_dir).await?;
+            for child in self.list(&folder_id).await? {
+                let local_path = local_dir.join(&child.name);
+                if child.is_folder() {
+                    pending.push((child.id, local_path));
+                } else {
+                    self.download_by_id(&child.id, &local_path).await?;
+                    paths.push(local_path);
+                }
             }
-            let local_path = dest_dir.join(&child.name);
-            self.download_by_id(&child.id, &local_path).await?;
-            paths.push(local_path);
         }
 
         Ok(paths)
