@@ -1,0 +1,13 @@
+# Production code denies panic-based error handling through workspace lints.
+# Tests may use these idioms for concise assertions.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+
+# Keep Clippy's built-in proper nouns when extending this list.
+doc-valid-idents = [".."]
+
+disallowed-macros = [
+  { path = "std::dbg", reason = "remove before commit" },
+]

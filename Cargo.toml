@@ -3,14 +3,21 @@ resolver = "3"
 members = ["crates/gdown", "crates/gdown-cli"]
 
 [workspace.package]
+version = "0.1.0"
 edition = "2024"
 license = "MIT"
+readme = "README.md"
+repository = "https://github.com/romnn/gdown-rs"
 
 [workspace.lints.rust]
+warnings = { level = "warn", priority = -1 }
 unsafe_code = "deny"
 unused_must_use = "deny"
+missing_docs = "warn"
 
 [workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
 unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
@@ -18,6 +25,23 @@ unreachable = "deny"
 unimplemented = "deny"
 todo = "deny"
 indexing_slicing = "deny"
+missing_errors_doc = "warn"
+await_holding_lock = "deny"
+allow_attributes_without_reason = "deny"
+
+map_unwrap_or = "allow"
+assigning_clones = "allow"
+struct_excessive_bools = "allow"
+
+[workspace.metadata.cargo-fc]
+install_missing_targets = true
+dedupe = true
+aggregate_targets = false
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "x86_64-pc-windows-gnu",
+  "aarch64-apple-darwin",
+]
 
 [workspace.metadata.cargo-fc.subcommands.udeps]
 maximal_features = true

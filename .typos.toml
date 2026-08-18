@@ -1,0 +1,21 @@
+[files]
+ignore-files = true
+extend-exclude = [
+  # This captured Google Drive page is preserved verbatim as parser test data.
+  "crates/gdown/tests/data/folder-page-sample.html",
+]
+
+[default]
+extend-ignore-re = [
+  # "spellcheck:ignore-line" ignores the current line.
+  "(?Rm)^.*(#|//|--|<!--)\\s*spellcheck:ignore-line(\\s*-->)?\\s*$",
+
+  # "spellcheck:ignore-next-line" ignores the next line.
+  "(?Rm)^.*(#|//|--|<!--)\\s*spellcheck:ignore-next-line.*?\\n.*?$",
+
+  # "spellcheck:ignore-block" ignores the following block through the first empty line.
+  "(?s)(#|//|--|<!--)\\s*spellcheck:ignore-block(.*?)(?:(?:\\r*\\n){2})",
+
+  # Text between the start and end directives is intentionally omitted.
+  "(?s)(#|//|--|<!--)\\s*spellcheck:ignore-start.*?\\n.*?(#|//|--|<!--)\\s*spellcheck:ignore-end",
+]

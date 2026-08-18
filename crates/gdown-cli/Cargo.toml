@@ -1,8 +1,11 @@
 [package]
 name = "gdown-cli"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
+readme.workspace = true
+repository.workspace = true
+publish = false
 description = "CLI for downloading files and folders from Google Drive"
 
 [[bin]]

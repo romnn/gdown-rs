@@ -1,0 +1,63 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+dist: goreleaser-dist
+
+builds:
+  - id: &bin gdown
+    builder: rust
+    binary: *bin
+    tool: cargo
+    command: zigbuild
+    targets:
+      - x86_64-unknown-linux-musl
+      - aarch64-unknown-linux-musl
+      - x86_64-apple-darwin
+      - aarch64-apple-darwin
+      - x86_64-pc-windows-gnu
+      - aarch64-pc-windows-gnullvm
+    flags: ["--release", "--package=gdown-cli"]
+
+archives:
+  - id: *bin
+    ids: [*bin]
+    formats: ["tar.gz"]
+    name_template: "{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [LICENSE]
+    format_overrides:
+      - goos: windows
+        formats: ["zip"]
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  use: github
+  filters:
+    exclude: ["^ci:", "^docs:", "^test:"]
+
+homebrew_casks:
+  - name: *bin
+    ids: [*bin]
+    description: "Download files and folders from Google Drive."
+    custom_block: |
+      os macos: "darwin", linux: "linux"
+    directory: Casks
+    commit_author:
+      name: romnn
+      email: contact@romnn.com
+    repository:
+      owner: romnn
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+      pull_request:
+        enabled: false
+    hooks:
+      post:
+        install: |
+          if OS.mac? && File.exist?("/usr/bin/xattr")
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/gdown"]
+          end
+
+release:
+  draft: false

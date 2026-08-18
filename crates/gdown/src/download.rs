@@ -149,7 +149,6 @@ pub async fn download(opts: &DownloadOptions) -> Result<Option<String>> {
     download_to_file(&client, res, &current_url, &url_origin, &output, opts).await
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn resolve_gdrive_response(
     client: &Client,
     initial_url: String,

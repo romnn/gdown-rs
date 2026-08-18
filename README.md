@@ -29,20 +29,10 @@ The main goal is the same as upstream: download files (and folders) from Google 
 
 ## Installation
 
-### Homebrew (recommended)
-
-If you maintain a tap/formula, install it like:
+### CLI
 
 ```bash
-brew install gdown
-```
-
-If you don’t have a brew formula yet, you can install via Cargo.
-
-### Cargo
-
-```bash
-cargo install --locked --path .
+cargo install --locked --git https://github.com/romnn/gdown-rs gdown-cli
 ```
 
 ## CLI usage
@@ -103,7 +93,7 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-gdown = { path = "." }
+gdown = { git = "https://github.com/romnn/gdown-rs" }
 ```
 
 ### Download a file
@@ -144,8 +134,9 @@ fn main() -> Result<(), gdown::Error> {
 ## Tests
 
 ```bash
-cargo test
-cargo clippy --all-targets
+mise install
+task test
+task lint:fc
 ```
 
 ## Notes / differences from upstream
