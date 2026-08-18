@@ -327,11 +327,18 @@ async fn download_to_file(
         dir.join(format!("{basename}.part"))
     };
 
-    let mut f = tokio::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&tmp_file)
-        .await?;
+    let mut open_options = tokio::fs::OpenOptions::new();
+    open_options.create(true);
+    if resume {
+        open_options.append(true);
+    } else {
+        // A fresh download restarts from byte zero: a `.part` left behind by a failed
+        // earlier attempt must be truncated here, or the full response body would be
+        // appended after the stale partial bytes and the corrupt result renamed into
+        // place as if it were the real file.
+        open_options.write(true).truncate(true);
+    }
+    let mut f = open_options.open(&tmp_file).await?;
 
     let mut start_size = f.metadata().await?.len();
     if start_size > 0 && resume {
