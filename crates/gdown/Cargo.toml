@@ -9,7 +9,35 @@ publish = false
 description = "Download files and folders from Google Drive shared links"
 
 [features]
+default = ["rustls"]
+default-tls = ["reqwest/default-tls"]
 indicatif = ["dep:indicatif"]
+native-tls = ["reqwest/native-tls"]
+native-tls-no-alpn = ["reqwest/native-tls-no-alpn"]
+native-tls-vendored = ["reqwest/native-tls-vendored"]
+native-tls-vendored-no-alpn = ["reqwest/native-tls-vendored-no-alpn"]
+rustls = ["reqwest/rustls"]
+rustls-no-provider = ["reqwest/rustls-no-provider"]
+
+[package.metadata.cargo-fc]
+# The CLI covers `indicatif` with the default TLS backend; crossing it with every
+# forwarded backend adds no gdown-specific behavior.
+exclude_features = ["indicatif"]
+mutually_exclusive_features = [[
+  "default",
+  "default-tls",
+  "native-tls",
+  "native-tls-no-alpn",
+  "native-tls-vendored",
+  "native-tls-vendored-no-alpn",
+  "rustls",
+  "rustls-no-provider",
+]]
+no_empty_feature_set = true
+
+[package.metadata.cargo-fc.target.'cfg(all(target_os = "linux", cross))']
+# Non-vendored OpenSSL requires a target sysroot when cross-compiling to Linux.
+exclude_features = { add = ["native-tls", "native-tls-no-alpn"] }
 
 [lints]
 workspace = true
@@ -19,7 +47,12 @@ bzip2 = "0.6"
 flate2 = "1"
 indicatif = { version = "0.18", optional = true }
 regex = "1"
-reqwest = { version = "0.13", features = ["cookies"] }
+reqwest = { version = "0.13", default-features = false, features = [
+  "charset",
+  "cookies",
+  "http2",
+  "system-proxy",
+] }
 scraper = "0.27.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

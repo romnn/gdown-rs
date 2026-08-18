@@ -96,6 +96,19 @@ Add to `Cargo.toml`:
 gdown = { git = "https://github.com/romnn/gdown-rs" }
 ```
 
+Rustls is the default TLS backend. To use the platform-native TLS backend instead:
+
+```toml
+[dependencies]
+gdown = { git = "https://github.com/romnn/gdown-rs", default-features = false, features = ["native-tls"] }
+```
+
+On Linux, `native-tls` uses OpenSSL. The `native-tls-vendored` feature builds a vendored copy of
+OpenSSL. The `default-tls`, `native-tls-no-alpn`, `native-tls-vendored-no-alpn`, `rustls`, and
+`rustls-no-provider` features also forward directly to Reqwest. Applications using
+`rustls-no-provider` must install a process-wide Rustls crypto provider before constructing a
+client.
+
 ### Download a file
 
 ```rust

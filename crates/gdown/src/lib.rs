@@ -6,7 +6,13 @@
 //!
 //! # Optional features
 //!
+//! - `rustls` is enabled by default.
+//! - `default-tls`, `native-tls`, `native-tls-no-alpn`, `native-tls-vendored`,
+//!   `native-tls-vendored-no-alpn`, and `rustls-no-provider` forward the corresponding Reqwest
+//!   TLS features.
 //! - `indicatif` adds a terminal progress-bar implementation.
+//!
+//! Disable default features when selecting a non-default TLS backend.
 //!
 //! # Examples
 //!
