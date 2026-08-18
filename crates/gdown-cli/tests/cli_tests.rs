@@ -1,3 +1,5 @@
+//! Exercises the command-line parser and process exit status end to end.
+
 #[test]
 fn test_cli_version_flag() {
     let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("gdown");

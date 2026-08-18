@@ -1,3 +1,5 @@
+//! Provides a command-line interface for downloading public Google Drive files and folders.
+
 use std::process;
 use std::sync::Arc;
 
@@ -49,64 +51,63 @@ fn parse_file_size(s: &str) -> Result<f64, String> {
     version,
     about = "Download files from Google Drive and other URLs"
 )]
-#[allow(
-    clippy::struct_excessive_bools,
-    reason = "CLI flag structs naturally contain many booleans"
-)]
 struct Cli {
-    /// URL or file/folder ID to download from
+    /// Selects the source URL or Google Drive file or folder ID.
     url_or_id: String,
 
-    /// Output file name/path; end with "/" to create a new directory
+    /// Selects the output file or directory path.
+    ///
+    /// End a directory path with the platform's path separator.
     #[arg(short = 'O', long)]
     output: Option<String>,
 
-    /// Suppress logging except errors
+    /// Suppresses all logging except errors.
     #[arg(short, long)]
     quiet: bool,
 
-    /// (file only) Extract Google Drive's file ID from a fuzzy URL
+    /// Extracts a file ID from a non-direct Google Drive URL.
     #[arg(long)]
     fuzzy: bool,
 
-    /// <protocol://host:port> download using the specified proxy
+    /// Routes downloads through a proxy such as `http://host:port`.
     #[arg(long)]
     proxy: Option<String>,
 
-    /// Download speed limit per second (e.g., '10MB' -> 10MB/s)
+    /// Limits download speed using a byte suffix such as `10MB`.
     #[arg(long, value_parser = parse_file_size)]
     speed: Option<f64>,
 
-    /// Don't use cookies
+    /// Disables the HTTP cookie store.
     #[arg(long)]
     no_cookies: bool,
 
-    /// Don't check the server's TLS certificate
+    /// Accepts invalid server TLS certificates.
     #[arg(long)]
     no_check_certificate: bool,
 
-    /// Resume getting partially-downloaded files while skipping fully downloaded ones
+    /// Resumes partial downloads and skips files that already exist.
     #[arg(short = 'c', long = "continue")]
     resume: bool,
 
-    /// Download entire folder instead of a single file
+    /// Downloads an entire folder instead of a single file.
     #[arg(long)]
     folder: bool,
 
-    /// (folder only) Allow downloading folders with more than 50 files
+    /// Allows folder downloads containing 50 or more files.
     #[arg(long)]
     ignore_file_limit: bool,
 
-    /// Format of Google Docs, Spreadsheets and Slides.
-    /// Default is Google Docs: 'docx', Spreadsheet: 'xlsx', Slides: 'pptx'.
+    /// Selects the export format for Google Docs, Sheets, or Slides.
+    ///
+    /// Defaults are `docx` for Docs, `xlsx` for Sheets, and `pptx` for Slides.
     #[arg(long)]
     format: Option<String>,
 
-    /// User-Agent to use for downloading file
+    /// Overrides the default HTTP user agent.
     #[arg(long)]
     user_agent: Option<String>,
 
-    /// Don't show progress bar
+    /// Disables the terminal progress bar.
     #[arg(long)]
     no_progress: bool,
 }

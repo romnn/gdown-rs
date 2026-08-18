@@ -1,3 +1,5 @@
+//! Builds HTTP clients and streams bounded response bodies.
+
 use std::time::{Duration, Instant};
 
 use reqwest::{Client, ClientBuilder, Response};
@@ -13,17 +15,23 @@ const DEFAULT_FOLDER_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 
 
 const MAX_RESPONSE_HTML_BYTES: usize = 512 * 1024;
 
+/// Returns the browser-style user agent used for file requests by default.
 #[must_use]
 pub fn default_file_user_agent() -> &'static str {
     DEFAULT_FILE_USER_AGENT
 }
 
+/// Returns the browser-style user agent used for folder-listing requests by default.
 #[must_use]
 pub fn default_folder_user_agent() -> &'static str {
     DEFAULT_FOLDER_USER_AGENT
 }
 
-/// Build an HTTP client with the given configuration.
+/// Builds an HTTP client with the given transport configuration.
+///
+/// When `proxy` is present, it is applied to every request.
+/// Setting `use_cookies` enables an in-memory cookie store, while setting `verify` to
+/// `false` accepts invalid TLS certificates.
 ///
 /// # Errors
 ///
@@ -48,6 +56,9 @@ pub fn build_client(
     Ok(builder.build()?)
 }
 
+/// Reads a valid `Content-Length` response header as a byte count.
+///
+/// Returns [`None`] when the header is absent, non-UTF-8, or not an unsigned integer.
 #[must_use]
 pub fn content_length(res: &Response) -> Option<u64> {
     res.headers()
@@ -56,9 +67,13 @@ pub fn content_length(res: &Response) -> Option<u64> {
         .and_then(|v| v.parse::<u64>().ok())
 }
 
-/// Stream response body to `writer` with optional speed limiting and progress.
+/// Streams a response body to `writer` with optional throttling and progress updates.
 ///
-/// Returns the number of bytes written.
+/// The speed limit is measured in bytes per second.
+/// When present, `speed_limit` must be positive and finite.
+/// Progress positions include `start_offset`, but the returned byte count covers only bytes read
+/// from this response.
+/// The writer is flushed and [`Progress::on_finish`] is called after a successful transfer.
 ///
 /// # Errors
 ///
@@ -82,9 +97,9 @@ pub async fn stream_response(
         }
         if let Some(limit) = speed_limit {
             let elapsed = t_start.elapsed().as_secs_f64();
-            #[allow(
+            #[expect(
                 clippy::cast_precision_loss,
-                reason = "speed limiting uses approximate floating point; minor precision loss is acceptable"
+                reason = "throughput throttling tolerates minor precision loss"
             )]
             let expected = downloaded as f64 / limit;
             if elapsed < expected {
@@ -102,9 +117,10 @@ pub async fn stream_response(
     Ok(downloaded)
 }
 
-/// Read response body with an actual network-level size limit.
+/// Reads at most 512 KiB from a response body.
 ///
-/// Reads chunks until `MAX_RESPONSE_HTML_BYTES` is reached, then stops.
+/// The returned string replaces malformed UTF-8 sequences and may end in the middle of the
+/// response.
 ///
 /// # Errors
 ///
@@ -126,6 +142,11 @@ pub async fn read_response_limited(res: Response) -> Result<String> {
     Ok(String::from_utf8_lossy(&buf).to_string())
 }
 
+/// Converts an untrusted filename into a single safe path component.
+///
+/// Leading and trailing whitespace or quotes are removed, path separators become underscores,
+/// and non-breaking spaces become ordinary spaces.
+/// Empty names and the special components `.` and `..` become `_`.
 #[must_use]
 pub fn sanitize_filename(name: &str) -> String {
     let cleaned = name

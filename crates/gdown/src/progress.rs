@@ -1,3 +1,5 @@
+//! Reports terminal download progress through `indicatif`.
+
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use indicatif::{ProgressBar, ProgressStyle};
@@ -16,6 +18,7 @@ pub struct IndicatifProgress {
 }
 
 impl IndicatifProgress {
+    /// Creates a spinner that becomes a byte progress bar once a total is reported.
     #[must_use]
     pub fn new() -> Self {
         let bar = ProgressBar::new_spinner();

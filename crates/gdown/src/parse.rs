@@ -1,3 +1,5 @@
+//! Parses Google Drive URLs, confirmation pages, headers, and folder metadata.
+
 use regex::Regex;
 use reqwest::Response;
 use reqwest::header::{HeaderMap, SET_COOKIE};
@@ -10,13 +12,7 @@ use crate::error::{Error, Result};
 
 macro_rules! lazy_regex {
     ($pattern:expr) => {
-        LazyLock::new(|| {
-            #[allow(
-                clippy::expect_used,
-                reason = "regex pattern is a compile-time literal"
-            )]
-            Regex::new($pattern).expect("valid regex literal")
-        })
+        LazyLock::new(|| Regex::new($pattern).expect("valid regex literal"))
     };
 }
 
@@ -31,6 +27,9 @@ fn is_action(action: &str, allowed: &[&str]) -> bool {
     allowed.contains(&action)
 }
 
+/// Returns whether `url_str` is an absolute URL on a supported Google Drive host.
+///
+/// Only the exact hosts `drive.google.com` and `docs.google.com` are recognized.
 #[must_use]
 pub fn is_google_drive_url(url_str: &str) -> bool {
     if let Ok(parsed) = Url::parse(url_str)
@@ -41,14 +40,21 @@ pub fn is_google_drive_url(url_str: &str) -> bool {
     false
 }
 
-/// Result of parsing a Google Drive URL.
+/// Describes the Google Drive-specific parts recognized in a URL.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedUrl {
+    /// File ID extracted from one `id` query parameter or a supported URL path.
+    ///
+    /// This is [`None`] for invalid URLs, non-Google hosts, unsupported paths, or URLs with
+    /// multiple `id` query parameters.
     pub file_id: Option<String>,
+    /// Indicates whether the parsed URL path ends in `/uc`.
     pub is_download_link: bool,
 }
 
-/// Parse a Google Drive URL, extracting the file ID and whether it's a direct download link.
+/// Parses a URL for a Google Drive file ID and direct-download path.
+///
+/// Invalid and unsupported URLs return a value with no file ID instead of an error.
 #[must_use]
 pub fn parse_url(url_str: &str) -> ParsedUrl {
     let Ok(parsed) = Url::parse(url_str) else {
@@ -133,6 +139,9 @@ pub fn parse_url(url_str: &str) -> ParsedUrl {
     }
 }
 
+/// Extracts the first decoded `resourcekey` query parameter from a URL.
+///
+/// Returns [`None`] when the URL is invalid or the parameter is absent.
 #[must_use]
 pub fn extract_resource_key(url: &str) -> Option<String> {
     Url::parse(url).ok().and_then(|u| {
@@ -142,7 +151,9 @@ pub fn extract_resource_key(url: &str) -> Option<String> {
     })
 }
 
-/// Extract the download URL from a Google Drive confirmation page.
+/// Extracts a download URL from a Google Drive confirmation page.
+///
+/// Link, form, and embedded JSON response shapes are supported.
 ///
 /// # Errors
 ///
@@ -221,6 +232,9 @@ pub fn url_from_gdrive_confirmation(contents: &str) -> Result<String> {
     ))
 }
 
+/// Extracts and sanitizes a filename from a response's `Content-Disposition` header.
+///
+/// Returns [`None`] when the header is absent, invalid, or unsupported.
 #[must_use]
 pub fn filename_from_response(response: &Response) -> Option<String> {
     let content_disposition = response.headers().get("Content-Disposition")?;
@@ -228,6 +242,10 @@ pub fn filename_from_response(response: &Response) -> Option<String> {
     filename_from_content_disposition(cd_str)
 }
 
+/// Extracts and sanitizes a supported `Content-Disposition` filename.
+///
+/// UTF-8 extended filenames and quoted `attachment` filenames are recognized.
+/// Returns [`None`] when neither form is present or URL decoding fails.
 #[must_use]
 pub fn filename_from_content_disposition(raw: &str) -> Option<String> {
     let decoded = urlencoding::decode(raw).ok()?;
@@ -251,6 +269,10 @@ pub fn filename_from_content_disposition(raw: &str) -> Option<String> {
     None
 }
 
+/// Extracts a Google Drive confirmation token from `Set-Cookie` headers.
+///
+/// The first non-empty cookie whose name starts with `download_warning` is returned.
+#[must_use]
 pub fn confirm_token_from_headers(headers: &HeaderMap) -> Option<String> {
     for value in &headers.get_all(SET_COOKIE) {
         let Ok(cookie) = value.to_str() else {
@@ -270,6 +292,10 @@ pub fn confirm_token_from_headers(headers: &HeaderMap) -> Option<String> {
     None
 }
 
+/// Extracts a Google Drive confirmation token from HTML or embedded URLs.
+///
+/// The placeholder token `t` is discarded, and the longest remaining token is returned.
+#[must_use]
 pub fn confirm_token_from_html(html: &str) -> Option<String> {
     let html = html.replace("&amp;", "&");
     let needle = "confirm=";
@@ -303,6 +329,7 @@ pub fn confirm_token_from_html(html: &str) -> Option<String> {
     tokens.pop()
 }
 
+/// Extracts the text captured by the first recognized HTML `title` element.
 #[must_use]
 pub fn title_from_html(html: &str) -> Option<String> {
     TITLE_RE
@@ -314,20 +341,28 @@ pub fn title_from_html(html: &str) -> Option<String> {
 /// A direct child entry parsed from a Google Drive folder page.
 #[derive(Debug, Clone)]
 pub struct FolderChild {
+    /// Google Drive identifier of the child entry.
     pub id: String,
+    /// Display name of the child entry.
     pub name: String,
+    /// MIME type reported for the child entry.
     pub mime_type: String,
 }
 
-/// Result of parsing a Google Drive folder page.
+/// Metadata and direct children parsed from a Google Drive folder page.
 #[derive(Debug, Clone)]
 pub struct ParsedFolderPage {
+    /// Folder ID extracted from the requested URL.
     pub folder_id: String,
+    /// Folder display name extracted from the page title.
     pub folder_name: String,
+    /// Well-formed direct child entries found in the embedded metadata.
     pub children: Vec<FolderChild>,
 }
 
-/// Parse a Google Drive folder page to extract folder metadata and children.
+/// Parses folder metadata and direct children from a Google Drive folder page.
+///
+/// Embedded entries missing an ID, name, or MIME type are skipped.
 ///
 /// # Errors
 ///
@@ -508,7 +543,6 @@ fn decode_unicode_escapes(s: &str) -> String {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, reason = "tests")]
 mod tests {
     use super::*;
 

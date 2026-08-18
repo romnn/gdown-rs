@@ -1,3 +1,5 @@
+//! Defines shared download options and progress reporting contracts.
+
 use std::sync::Arc;
 
 use crate::error::{Error, Result};
@@ -5,34 +7,47 @@ use crate::error::{Error, Result};
 /// Callback for reporting download progress.
 ///
 /// Implement this trait to receive progress updates during downloads.
-/// The built-in [`IndicatifProgress`](crate::progress::IndicatifProgress)
-/// implementation is available when the `indicatif` feature is enabled.
+///
+/// The optional `indicatif` feature provides a terminal progress-bar implementation.
 pub trait Progress: Send + Sync {
-    /// Called after each chunk is downloaded.
+    /// Reports the cumulative byte position after a response chunk is written.
     ///
-    /// `downloaded` is the total bytes downloaded so far (including any
-    /// resume offset). `total` is the expected total size, if known.
+    /// `downloaded` includes any resume offset.
+    /// `total` is the expected final size in bytes when the server provides enough
+    /// information to calculate it.
     fn on_progress(&self, downloaded: u64, total: Option<u64>);
 
-    /// Called when the download is complete.
+    /// Reports that the response body was written and flushed successfully.
+    ///
+    /// This method is not called when streaming or flushing fails.
     fn on_finish(&self);
 }
 
-/// Fields shared by both file and folder download options.
+/// Holds settings shared by file and folder downloads.
 #[derive(Clone)]
-#[allow(
-    clippy::struct_excessive_bools,
-    reason = "mirrors CLI flags; these are independent on/off switches, not a state machine"
-)]
 pub struct Options {
+    /// Selects the output path.
+    ///
+    /// [`None`] derives a filename or uses the current directory.
+    /// A value of `-` writes a single-file download to standard output.
     pub output: Option<String>,
+    /// Suppresses informational download logging when `true`.
     pub quiet: bool,
+    /// Routes HTTP and HTTPS requests through this proxy URL when present.
     pub proxy: Option<String>,
+    /// Limits transfer throughput to this many bytes per second when present.
+    ///
+    /// Values must be positive and finite.
     pub speed: Option<f64>,
+    /// Enables the HTTP client's in-memory cookie store.
     pub use_cookies: bool,
+    /// Verifies server TLS certificates when `true`.
     pub verify: bool,
+    /// Overrides the operation-specific default HTTP user agent when present.
     pub user_agent: Option<String>,
+    /// Reuses partial downloads and skips completed files when `true`.
     pub resume: bool,
+    /// Receives progress updates for transferred response bodies when present.
     pub progress: Option<Arc<dyn Progress>>,
 }
 
@@ -68,10 +83,11 @@ impl Default for Options {
     }
 }
 
-/// Resolve a URL-or-ID pair into a single URL.
+/// Resolves a URL-or-ID pair into a single URL.
 ///
-/// Exactly one of `url` / `id` must be `Some`. `base_url_fn` turns an
-/// ID into a full URL.
+/// Exactly one of `url` and `id` must be [`Some`].
+/// `base_url_fn` converts a supplied ID into a full URL and is not called when `url` is
+/// supplied.
 ///
 /// # Errors
 ///

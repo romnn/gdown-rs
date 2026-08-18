@@ -1,3 +1,30 @@
+//! Downloads files and folder trees from public Google Drive links.
+//!
+//! Use [`download()`] for one file and [`download_folder()`] for a complete folder tree.
+//! The lower-level [`DriveFolder`] API supports cached directory listing, path resolution, and
+//! selective downloads.
+//!
+//! # Optional features
+//!
+//! - `indicatif` adds a terminal progress-bar implementation.
+//!
+//! # Examples
+//!
+//! ```no_run
+//! # // Uses `no_run` because downloading requires network access to Google Drive.
+//! # async fn example() -> gdown::Result<()> {
+//! use gdown::{DownloadOptions, download};
+//!
+//! let options = DownloadOptions {
+//!     id: Some("FILE_ID".to_string()),
+//!     ..DownloadOptions::default()
+//! };
+//! let output = download(&options).await?;
+//! assert!(output.is_some());
+//! # Ok(())
+//! # }
+//! ```
+
 pub mod client;
 pub mod download;
 pub mod download_folder;

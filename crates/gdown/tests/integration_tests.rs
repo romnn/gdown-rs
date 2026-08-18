@@ -1,3 +1,5 @@
+//! Exercises the public download, parsing, and extraction APIs together.
+
 use color_eyre::eyre;
 use std::path::Path;
 

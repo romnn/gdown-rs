@@ -1,12 +1,15 @@
+//! Extracts archive formats supported by downloaded files.
+
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
 
-/// Extract an archive file.
+/// Extracts an archive file.
 ///
 /// Supported formats: `.zip`, `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz`.
 ///
-/// Returns the list of extracted file paths.
+/// When `to` is [`None`], entries are extracted beside the archive.
+/// The returned paths include every archive entry, including directory entries.
 ///
 /// # Errors
 ///

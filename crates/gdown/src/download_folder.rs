@@ -1,3 +1,5 @@
+//! Lists, resolves, and downloads shared Google Drive folders.
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -15,12 +17,16 @@ const MAX_FILES: usize = 50;
 /// An entry in a Google Drive folder listing.
 #[derive(Debug, Clone)]
 pub struct DirEntry {
+    /// Google Drive identifier used for follow-up listings or downloads.
     pub id: String,
+    /// Display name reported by Google Drive.
     pub name: String,
+    /// MIME type reported by Google Drive.
     pub mime_type: String,
 }
 
 impl DirEntry {
+    /// Returns whether this entry represents a Google Drive folder.
     #[must_use]
     pub fn is_folder(&self) -> bool {
         self.mime_type == FOLDER_MIME
@@ -40,29 +46,33 @@ impl From<FolderChild> for DirEntry {
 /// A flat entry with full relative path, for recursive listings.
 #[derive(Debug, Clone)]
 pub struct FlatEntry {
+    /// Google Drive identifier used for downloads or child listings.
     pub id: String,
+    /// Slash-separated path relative to the opened folder.
     pub path: String,
+    /// Indicates whether the entry is a folder rather than a downloadable file.
     pub is_folder: bool,
 }
 
-/// A handle to a Google Drive shared folder with lazy, cached resolution.
+/// Lazily lists and downloads content from a shared Google Drive folder.
 ///
-/// Created cheaply via [`open()`](Self::open) (no HTTP). Directory listings
-/// are fetched on demand one level at a time and cached for reuse.
+/// [`DriveFolder::open`] creates the handle without making an HTTP request.
+/// Directory listings are fetched one level at a time and cached by folder ID for reuse.
 pub struct DriveFolder {
     root_id: String,
     resource_key: Option<String>,
     client: reqwest::Client,
     cache: tokio::sync::Mutex<HashMap<String, Vec<DirEntry>>>,
-    /// Options applied to every file download (progress, quiet, etc.).
+    /// Options applied to every file downloaded through this handle.
     options: Options,
 }
 
 impl DriveFolder {
-    /// Open a Google Drive folder URL.
+    /// Opens a Google Drive folder URL with the default folder HTTP client.
     ///
-    /// Parses the folder ID and resource key from the URL and builds an HTTP
-    /// client. No HTTP requests are made.
+    /// This constructor extracts the final path segment as the root folder ID and retains the
+    /// optional `resourcekey` query parameter.
+    /// No HTTP requests are made until a listing or download method is called.
     ///
     /// # Errors
     ///
@@ -72,7 +82,10 @@ impl DriveFolder {
         Self::open_with_client(url, client)
     }
 
-    /// Open with a pre-built HTTP client.
+    /// Opens a Google Drive folder URL with a caller-provided HTTP client.
+    ///
+    /// The client is retained for all uncached listing requests.
+    /// No HTTP requests are made by this constructor.
     ///
     /// # Errors
     ///
@@ -104,14 +117,16 @@ impl DriveFolder {
         })
     }
 
-    /// Set options (progress callback, quiet, etc.) for all downloads.
+    /// Replaces the options applied to subsequent file downloads.
     #[must_use]
     pub fn with_options(mut self, options: Options) -> Self {
         self.options = options;
         self
     }
 
-    /// List direct children of a folder by ID (cached after first fetch).
+    /// Lists the direct children of a folder ID.
+    ///
+    /// Successful results are cached and later calls return a cloned snapshot.
     ///
     /// # Errors
     ///
@@ -132,7 +147,7 @@ impl DriveFolder {
         Ok(entries)
     }
 
-    /// List direct children of the root folder.
+    /// Lists the direct children of the opened root folder.
     ///
     /// # Errors
     ///
@@ -141,7 +156,9 @@ impl DriveFolder {
         self.list(&self.root_id).await
     }
 
-    /// Resolve a `/`-separated path to its [`DirEntry`].
+    /// Resolves a `/`-separated path relative to the opened root.
+    ///
+    /// Empty path segments are ignored and names are matched exactly.
     ///
     /// # Errors
     ///
@@ -182,7 +199,10 @@ impl DriveFolder {
         Err(Error::Parse(format!("unexpected end of path: {path}")))
     }
 
-    /// Recursively list all files and folders.
+    /// Recursively lists every file and folder below the opened root.
+    ///
+    /// The root itself is omitted, each path is relative to it, and traversal order is
+    /// unspecified.
     ///
     /// # Errors
     ///
@@ -216,7 +236,7 @@ impl DriveFolder {
         Ok(result)
     }
 
-    /// Resolve a remote path and download the file.
+    /// Resolves a remote file path and downloads it to `output`.
     ///
     /// # Errors
     ///
@@ -226,7 +246,9 @@ impl DriveFolder {
         self.download_by_id(&entry.id, output).await
     }
 
-    /// Download a file by its Google Drive file ID.
+    /// Downloads a file by its Google Drive file ID.
+    ///
+    /// Missing parent directories for `output` are created before the request starts.
     ///
     /// # Errors
     ///
@@ -251,14 +273,14 @@ impl DriveFolder {
         Ok(())
     }
 
-    /// Download a remote directory tree into `dest_dir`, mirroring its layout.
+    /// Downloads a remote directory tree into `dest_dir`, mirroring its contents.
     ///
-    /// Subfolders are descended into, so a caller receives the same structure it would
-    /// see in Drive. This matters for formats that *are* directories — an Apple
-    /// `.mlpackage` keeps its weights two levels down — where copying only the top-level
-    /// files would produce an empty directory rather than a usable artifact.
+    /// Subfolders are descended into so the destination has the same structure as Google Drive.
+    /// This preserves directory-backed formats such as Apple `.mlpackage` bundles, whose
+    /// useful files may be several levels below the selected prefix.
     ///
-    /// Returns the downloaded file paths. Empty remote folders are still created locally.
+    /// The returned paths contain downloaded files but not directories.
+    /// Empty remote folders are still created locally.
     ///
     /// # Errors
     ///
@@ -290,6 +312,7 @@ impl DriveFolder {
         Ok(paths)
     }
 
+    /// Returns the Google Drive identifier of the opened root folder.
     #[must_use]
     pub fn root_id(&self) -> &str {
         &self.root_id
@@ -337,18 +360,26 @@ impl DriveFolder {
     }
 }
 
-/// Options for downloading an entire folder.
+/// Configures a recursive folder download.
 #[derive(Debug, Clone, Default)]
 pub struct DownloadFolderOptions {
+    /// Supplies the folder URL when `id` is [`None`].
     pub url: Option<String>,
+    /// Supplies a Google Drive folder ID when `url` is [`None`].
     pub id: Option<String>,
+    /// Controls output, transport, resumption, and progress reporting.
     pub options: Options,
+    /// Allows folders containing 50 or more files when `true`.
     pub ignore_file_limit: bool,
 }
 
-/// Downloads an entire folder from Google Drive.
+/// Downloads an entire Google Drive folder tree.
 ///
-/// Returns the list of local file paths that were downloaded.
+/// Exactly one of [`DownloadFolderOptions::url`] and [`DownloadFolderOptions::id`] must
+/// be present.
+/// The returned strings are local file paths that were downloaded or skipped as already complete.
+/// When the configured output ends with a path separator, the folder ID is appended as the local
+/// root directory name.
 ///
 /// # Errors
 ///

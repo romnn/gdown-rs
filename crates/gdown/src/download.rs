@@ -1,3 +1,5 @@
+//! Orchestrates single-file downloads and Google Drive confirmation handling.
+
 use std::path::{Path, PathBuf};
 
 use reqwest::header::{HeaderMap, HeaderValue, RANGE};
@@ -16,25 +18,33 @@ use crate::parse::{
 };
 use crate::types::{Options, resolve_url_or_id};
 
-/// Options for downloading a single file.
+/// Configures a single-file download.
 #[derive(Debug, Clone, Default)]
 pub struct DownloadOptions {
+    /// Supplies the source URL when `id` is [`None`].
     pub url: Option<String>,
+    /// Supplies a Google Drive file ID when `url` is [`None`].
     pub id: Option<String>,
+    /// Controls output, transport, resumption, and progress reporting.
     pub options: Options,
+    /// Converts a recognized Google Drive sharing URL into a direct-download request.
     pub fuzzy: bool,
+    /// Overrides the default export format for Google Docs, Sheets, or Slides.
     pub format: Option<String>,
 }
 
-/// Download a file from a URL (supports Google Drive).
+/// Downloads one file from Google Drive or another HTTP URL.
 ///
-/// Returns the output filename on success, or `None` when writing to stdout.
+/// Exactly one of [`DownloadOptions::url`] and [`DownloadOptions::id`] must be present.
+/// A successful filesystem download returns its output path, while standard-output transfers
+/// return [`None`].
+/// Filesystem transfers use a `.part` file and rename it only after the response is written
+/// successfully.
 ///
 /// # Errors
 ///
-/// Returns an error if the input options are invalid, HTTP requests fail,
-/// Google Drive confirmation pages cannot be parsed, or filesystem
-/// operations fail.
+/// Returns an error when options conflict, HTTP or filesystem operations fail, Google Drive
+/// confirmation data cannot be resolved, or resumption finds ambiguous partial files.
 #[tracing::instrument(
     name = "download",
     level = "info",
