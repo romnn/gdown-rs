@@ -75,7 +75,10 @@ fn extract_zip(path: &Path, dest: &Path) -> Result<Vec<PathBuf>> {
         let mut entry = archive
             .by_index(i)
             .map_err(|e| Error::Extract(format!("failed to read zip entry: {e}")))?;
-        let outpath = dest.join(entry.mangled_name());
+        let name = entry
+            .mangled_name()
+            .map_err(|e| Error::Extract(format!("failed to read zip entry name: {e}")))?;
+        let outpath = dest.join(name);
 
         if entry.is_dir() {
             std::fs::create_dir_all(&outpath)?;
