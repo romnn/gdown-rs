@@ -1,14 +1,16 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/SchemaStore/schemastore/refs/heads/master/src/schemas/json/github-workflow.json
 name: test
 on:
-  push: {}
+  push:
+    branches: [main]
   workflow_call: {}
   pull_request:
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened]
 
 env:
   MISE_GITHUB_TOKEN: ${{ github.token }}
   MISE_AUTO_INSTALL: "0"
+  MISE_HTTP_RETRIES: "12"
 
 jobs:
   test:
@@ -21,9 +23,8 @@ jobs:
         os: [ubuntu-24.04, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7
-      - uses: jdx/mise-action@v4
+      - uses: jdx/mise-action@v5
         with:
-          version: 2026.7.16
           install: false
           cache: true
           env: false
@@ -38,19 +39,3 @@ jobs:
         run: task test:fc
       - name: Doc-tests
         run: task test:doc
-
-  publish:
-    name: publish (dry-run)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-      - name: Publish crates (dry-run)
-        uses: romnn/publish-crates@main
-        with:
-          dry-run: true
-          resolve-versions: true

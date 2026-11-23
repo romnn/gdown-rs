@@ -282,7 +282,7 @@ fn test_extractall_tar_gz() -> eyre::Result<()> {
     let extract_dir = dir.path().join("extracted");
     let files = gdown::extractall(&tar_gz_path, Some(&extract_dir))?;
 
-    assert!(!files.is_empty());
+    assert_eq!(files, [extract_dir.join("greeting.txt")]);
     assert!(extract_dir.join("greeting.txt").exists());
     assert_eq!(
         std::fs::read_to_string(extract_dir.join("greeting.txt"))?,
